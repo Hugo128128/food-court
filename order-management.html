@@ -43,14 +43,19 @@
     renderAll();
   });
 
-  // 地理編碼（Nominatim 免費）
+  const GOOGLE_MAPS_KEY = 'AIzaSyANiGx2gHrZAk5V751mXhp6zajIWTE2Xyk';
+
+  // 地理編碼（Google Maps Geocoding API）
   async function geocode(address) {
     try {
-      const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address + ' 台灣')}&format=json&limit=1`, {
-        headers: { 'Accept-Language': 'zh-TW' }
-      });
+      const r = await fetch(
+        `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address + ' 台灣')}&key=${GOOGLE_MAPS_KEY}&language=zh-TW`
+      );
       const d = await r.json();
-      if (d?.[0]) return { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon) };
+      if (d.status === 'OK' && d.results?.[0]) {
+        const loc = d.results[0].geometry.location;
+        return { lat: loc.lat, lng: loc.lng };
+      }
     } catch(e) {}
     return null;
   }
@@ -75,7 +80,7 @@
       mapEl.href = `https://www.google.com/maps/dir/${ORIGIN.lat},${ORIGIN.lng}/${coord.lat},${coord.lng}`;
       mapEl.style.display = 'inline';
     } else {
-      distEl.textContent = '⚠️ 找不到此地址';
+      distEl.textContent = '⚠️ 找不到此地址，請確認後重試';
     }
   };
 
@@ -83,18 +88,39 @@
     const sel = document.getElementById('f-delivery-time');
     sel.innerHTML = '<option value="">— 請選擇送達時間 —</option>';
     const now = new Date();
-    now.setMinutes(Math.ceil(now.getMinutes()/15)*15, 0, 0);
-    for (let i = 0; i < 13; i++) {
-      const t = new Date(now.getTime() + i*15*60000);
-      const isToday = t.toDateString() === new Date().toDateString();
-      const dateLabel = isToday
-        ? `今天`
-        : `${t.getMonth()+1}/${t.getDate()}`;
-      const timeLabel = t.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'});
-      const label = `${dateLabel} ${timeLabel}`;
+    const todayStr = (now.getMonth()+1) + '/' + now.getDate();
+
+    // 今天：從現在起每15分鐘，到23:45
+    const startToday = new Date(now);
+    startToday.setMinutes(Math.ceil(now.getMinutes()/15)*15, 0, 0);
+    const endToday = new Date(now); endToday.setHours(23,45,0,0);
+    const grpToday = document.createElement('optgroup');
+    grpToday.label = '今天 ' + todayStr;
+    sel.appendChild(grpToday);
+    let t = new Date(startToday);
+    while (t <= endToday) {
       const opt = document.createElement('option');
-      opt.value = label; opt.textContent = label;
-      sel.appendChild(opt);
+      const tl = t.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'});
+      opt.value = '今天 ' + tl; opt.textContent = tl;
+      grpToday.appendChild(opt);
+      t = new Date(t.getTime() + 15*60000);
+    }
+
+    // 明天：全天 00:00 ~ 23:45
+    const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate()+1);
+    const tomorrowStr = (tomorrow.getMonth()+1) + '/' + tomorrow.getDate();
+    const grpTomorrow = document.createElement('optgroup');
+    grpTomorrow.label = '明天 ' + tomorrowStr;
+    sel.appendChild(grpTomorrow);
+    const startTm = new Date(tomorrow); startTm.setHours(0,0,0,0);
+    const endTm = new Date(tomorrow); endTm.setHours(23,45,0,0);
+    t = new Date(startTm);
+    while (t <= endTm) {
+      const opt = document.createElement('option');
+      const tl = t.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'});
+      opt.value = '明天 ' + tomorrowStr + ' ' + tl; opt.textContent = tl;
+      grpTomorrow.appendChild(opt);
+      t = new Date(t.getTime() + 15*60000);
     }
   }
 
@@ -117,6 +143,7 @@
     const deliveryFee  = document.getElementById('f-delivery-fee').value.trim();
     const amount       = document.getElementById('f-amount').value.trim();
     const distance     = document.getElementById('distance-result').dataset.km || '';
+    const pickupNumber = document.getElementById('f-pickup-number').value.trim();
 
     if (!shop || !items || !address) { alert('請填寫店家、品項、送達地址'); return; }
 
@@ -125,7 +152,7 @@
 
     try {
       const docRef = await addDoc(collection(db, 'orders'), {
-        shop, items, address, note, deliveryTime, deliveryFee, amount, distance,
+        shop, items, address, note, deliveryTime, deliveryFee, amount, distance, pickupNumber,
         status: 'pending', driver: '', createdAt: serverTimestamp(),
       });
 
@@ -137,12 +164,12 @@
           order: {
             id: docRef.id,
             shortId: docRef.id.slice(-6).toUpperCase(),
-            shop, items, address, note, deliveryTime, deliveryFee, amount, distance,
+            shop, items, address, note, deliveryTime, deliveryFee, amount, distance, pickupNumber,
           }
         }),
       });
 
-      ['f-shop','f-items','f-address','f-note','f-delivery-fee','f-amount'].forEach(id => document.getElementById(id).value='');
+      ['f-shop','f-items','f-address','f-note','f-delivery-fee','f-amount','f-pickup-number'].forEach(id => document.getElementById(id).value='');
       document.getElementById('f-delivery-time').value = '';
       document.getElementById('distance-result').textContent = '';
       document.getElementById('map-link').style.display = 'none';
@@ -167,6 +194,31 @@
   window.cancelOrder = async (id) => {
     if (!confirm('確定要取消這筆訂單？')) return;
     await updateDoc(doc(db,'orders',id), { status:'cancelled' });
+  };
+
+  // 棄單：回到待接單，重新發 LINE 通知
+  window.dropOrder = async (id) => {
+    if (!confirm('確定要棄單？訂單將回到待接單，並重新通知外送員群組。')) return;
+    await updateDoc(doc(db,'orders',id), { status:'pending', driver:'' });
+    // 重新發 LINE 通知
+    const order = allOrders.find(o => o.id === id);
+    if (order) {
+      await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          order: {
+            id: order.id,
+            shortId: order.id.slice(-6).toUpperCase(),
+            shop: order.shop, items: order.items, address: order.address,
+            note: order.note, deliveryTime: order.deliveryTime,
+            deliveryFee: order.deliveryFee, amount: order.amount,
+            distance: order.distance, pickupNumber: order.pickupNumber,
+          }
+        }),
+      });
+      showToast('已棄單，重新通知外送員群組！');
+    }
   };
 
   window.setFilter = (f) => {
@@ -219,6 +271,7 @@
         o.deliveryTime ? `<span class="tag tag-amber">⏰ ${o.deliveryTime}</span>` : '',
         o.amount       ? `<span class="tag tag-green">💰 $${o.amount}</span>` : '',
         o.deliveryFee  ? `<span class="tag tag-gray">外送費 $${o.deliveryFee}</span>` : '',
+        o.pickupNumber ? `<span class="tag tag-purple">取餐號 ${o.pickupNumber}</span>` : '',
       ].filter(Boolean).join('');
 
       return `<div class="order-card">
@@ -236,6 +289,7 @@
           <div class="order-actions">
             <span class="order-time">${time}</span>
             ${next?`<button class="action-btn primary" onclick="advanceStatus('${o.id}','${next}')">${STATUS_NEXT_LABEL[o.status]}</button>`:''}
+            ${o.status==='accepted'?`<button class="action-btn btn-drop" onclick="dropOrder('${o.id}')">棄單</button>`:''}
             ${o.status==='pending'?`<button class="action-btn" onclick="cancelOrder('${o.id}')">取消</button>`:''}
           </div>
         </div>
@@ -287,6 +341,7 @@
   .tag-amber{background:var(--amber-light);color:#92400e}
   .tag-green{background:var(--green-light);color:#065f46}
   .tag-gray{background:var(--gray-light);color:var(--text-2)}
+  .tag-purple{background:#ede9fe;color:#5b21b6}
   .status-badge{font-size:11px;font-weight:500;padding:4px 11px;border-radius:20px;white-space:nowrap;flex-shrink:0}
   .badge-pending{background:var(--amber-light);color:#92400e}
   .badge-accepted{background:var(--blue-light);color:#1e40af}
@@ -304,6 +359,8 @@
   .action-btn:hover{border-color:var(--border-hover);background:var(--gray-light)}
   .action-btn.primary{border-color:var(--green);color:var(--green-dark)}
   .action-btn.primary:hover{background:var(--green-light)}
+  .btn-drop{border-color:var(--amber)!important;color:#92400e!important}
+  .btn-drop:hover{background:var(--amber-light)!important}
   .empty{text-align:center;padding:48px 20px;color:var(--text-3);font-size:14px}
   .modal-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100;align-items:center;justify-content:center;padding:20px;overflow-y:auto}
   .modal-backdrop.open{display:flex}
@@ -408,6 +465,10 @@
         <label class="form-label">備註</label>
         <input class="form-input" id="f-note" type="text" placeholder="例：門口按對講機">
       </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">取餐號碼</label>
+      <input class="form-input" id="f-pickup-number" type="text" placeholder="例：A012、38號">
     </div>
     <div class="form-actions">
       <button class="btn-cancel" onclick="closeModal()">取消</button>
