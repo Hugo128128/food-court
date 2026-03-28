@@ -284,8 +284,8 @@
       return `<div class="order-card">
         <div class="order-top">
           <div class="order-meta">
-            <div class="order-id">#${o.id.slice(-6).toUpperCase()} &nbsp;·&nbsp; ${o.address}</div>
-            <div class="order-shop">${o.shop}${o.pickupNumber ? ' ' + o.pickupNumber : ''}${o.customer ? ' &nbsp;·&nbsp; ' + o.customer : ''}</div>
+            <div class="order-id">#${o.id.slice(-6).toUpperCase()}</div>
+            <div class="order-shop">${o.shop}${o.pickupNumber ? ' ' + o.pickupNumber : ''}${o.customer ? ' &nbsp;·&nbsp; ' + o.customer : ''}${o.address ? ' &nbsp;·&nbsp; ' + o.address : ''}</div>
             <div class="order-items">${o.items}${o.note?` <span class="order-note">· 備註：${o.note}</span>`:''}</div>
             ${tags?`<div class="order-tags">${tags}</div>`:''}
           </div>
@@ -350,7 +350,7 @@
   .tag-gray{background:var(--gray-light);color:var(--text-2)}
   .tag-purple{background:#ede9fe;color:#5b21b6}
   .status-badge{font-size:11px;font-weight:500;padding:4px 11px;border-radius:20px;white-space:nowrap;flex-shrink:0}
-  .badge-pending{font-size:14px!important;padding:6px 14px!important;font-weight:700!important}
+  .badge-pending{font-size:16px!important;padding:8px 16px!important;font-weight:700!important}
   .badge-pending{background:var(--amber-light);color:#92400e}
   .badge-accepted{background:var(--blue-light);color:#1e40af}
   .badge-delivering{background:var(--green-light);color:#065f46}
