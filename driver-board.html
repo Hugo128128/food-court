@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>美食街外送看板</title>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getFirestore, collection, onSnapshot, doc, updateDoc, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyDMZ_9LER29KpuL7d0NsSjbxKWeR_c_aCQ",
+    authDomain: "food-court-orders.firebaseapp.com",
+    projectId: "food-court-orders",
+    storageBucket: "food-court-orders.firebasestorage.app",
+    messagingSenderId: "348196844429",
+    appId: "1:348196844429:web:95a01423c510d499f7c3c4"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  let driverName = localStorage.getItem('driverName') || '';
+  let allOrders = [];
+
+  // 如果已有名字就直接進入，否則顯示輸入畫面
+  if (driverName) {
+    showBoard();
+  } else {
+    document.getElementById('login-screen').style.display = 'flex';
+  }
+
+  window.enterBoard = () => {
+    const name = document.getElementById('driver-name-input').value.trim();
+    if (!name) { alert('請輸入你的姓名'); return; }
+    driverName = name;
+    localStorage.setItem('driverName', name);
+    showBoard();
+  };
+
+  window.changeName = () => {
+    localStorage.removeItem('driverName');
+    location.reload();
+  };
+
+  function showBoard() {
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('board').style.display = 'block';
+    document.getElementById('driver-label').textContent = driverName;
+    startListening();
+  }
+
+  function startListening() {
+    const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
+    onSnapshot(q, (snapshot) => {
+      allOrders = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      renderBoard();
+    });
+  }
+
+  window.acceptOrder = async (id) => {
+    const btn = document.getElementById('btn-' + id);
+    if (btn) { btn.disabled = true; btn.textContent = '處理中...'; }
+    try {
+      await updateDoc(doc(db, 'orders', id), {
+        status: 'accepted',
+        driver: driverName,
+      });
+    } catch(e) {
+      alert('接單失敗，請重試');
+      if (btn) { btn.disabled = false; btn.textContent = '接單'; }
+    }
+  };
+
+  window.markDelivering = async (id) => {
+    await updateDoc(doc(db, 'orders', id), { status: 'delivering' });
+  };
+
+  window.markDone = async (id) => {
+    await updateDoc(doc(db, 'orders', id), {
+      status: 'done',
+      completedAt: serverTimestamp(),
+    });
+  };
+
+  function renderBoard() {
+    const pending    = allOrders.filter(o => o.status === 'pending');
+    const myOrders   = allOrders.filter(o => (o.status === 'accepted' || o.status === 'delivering') && o.driver === driverName);
+    const otherActive= allOrders.filter(o => (o.status === 'accepted' || o.status === 'delivering') && o.driver !== driverName);
+
+    // 統計數字
+    document.getElementById('cnt-pending').textContent = pending.length;
+    document.getElementById('cnt-mine').textContent    = myOrders.length;
+    document.getElementById('cnt-done').textContent    = allOrders.filter(o => o.status === 'done').length;
+
+    // 待接單
+    const pendingEl = document.getElementById('pending-list');
+    if (pending.length === 0) {
+      pendingEl.innerHTML = '<div class="empty-state">目前沒有待接的訂單</div>';
+    } else {
+      pendingEl.innerHTML = pending.map(o => `
+        <div class="order-card pending-card" id="card-${o.id}">
+          <div class="card-top">
+            <div class="card-info">
+              <div class="card-shop">${o.shop}</div>
+              <div class="card-items">${o.items}</div>
+              <div class="card-addr">送至：${o.address}${o.note ? '　備註：' + o.note : ''}</div>
+            </div>
+            <div class="card-time">${formatTime(o.createdAt)}</div>
+          </div>
+          <div class="card-action">
+            <button class="btn-accept" id="btn-${o.id}" onclick="acceptOrder('${o.id}')">接單</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // 我的訂單
+    const mineEl = document.getElementById('mine-list');
+    if (myOrders.length === 0) {
+      mineEl.innerHTML = '<div class="empty-state">你目前沒有進行中的訂單</div>';
+    } else {
+      mineEl.innerHTML = myOrders.map(o => {
+        const isDelivering = o.status === 'delivering';
+        return `
+          <div class="order-card mine-card">
+            <div class="card-top">
+              <div class="card-info">
+                <div class="card-shop">${o.shop}</div>
+                <div class="card-items">${o.items}</div>
+                <div class="card-addr">送至：${o.address}${o.note ? '　備註：' + o.note : ''}</div>
+              </div>
+              <span class="status-pill ${isDelivering ? 'pill-delivering' : 'pill-accepted'}">
+                ${isDelivering ? '配送中' : '已接單'}
+              </span>
+            </div>
+            <div class="card-action">
+              ${!isDelivering
+                ? `<button class="btn-secondary" onclick="markDelivering('${o.id}')">出發取餐</button>`
+                : `<button class="btn-done" onclick="markDone('${o.id}')">已送達</button>`
+              }
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // 其他外送員的訂單
+    const otherEl = document.getElementById('other-list');
+    if (otherActive.length === 0) {
+      otherEl.innerHTML = '<div class="empty-state">無</div>';
+    } else {
+      otherEl.innerHTML = otherActive.map(o => `
+        <div class="order-card other-card">
+          <div class="card-top">
+            <div class="card-info">
+              <div class="card-shop">${o.shop} <span class="other-driver">— ${o.driver}</span></div>
+              <div class="card-addr">送至：${o.address}</div>
+            </div>
+            <span class="status-pill pill-other">${o.status === 'delivering' ? '配送中' : '已接單'}</span>
+          </div>
+        </div>
+      `).join('');
+    }
+  }
+
+  function formatTime(ts) {
+    if (!ts?.toDate) return '—';
+    return ts.toDate().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  window.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && document.getElementById('login-screen').style.display !== 'none') {
+      enterBoard();
+    }
+  });
+</script>
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface-2: #222533;
+    --border: rgba(255,255,255,0.08);
+    --text: #f0f0ee;
+    --text-2: #9a9a96;
+    --text-3: #5a5a58;
+    --green: #06C755;
+    --green-dim: rgba(6,199,85,0.12);
+    --amber: #f59e0b;
+    --amber-dim: rgba(245,158,11,0.12);
+    --blue: #60a5fa;
+    --blue-dim: rgba(96,165,250,0.12);
+    --red: #f87171;
+    --radius: 12px;
+    --radius-sm: 8px;
+  }
+
+  body {
+    font-family: 'Noto Sans TC', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    font-size: 15px;
+    line-height: 1.5;
+  }
+
+  /* ── 登入畫面 ── */
+  #login-screen {
+    display: none;
+    min-height: 100vh;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .login-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 36px 32px;
+    width: 100%;
+    max-width: 380px;
+    text-align: center;
+  }
+  .login-icon {
+    width: 56px; height: 56px; border-radius: 50%;
+    background: var(--green-dim); border: 1px solid rgba(6,199,85,0.3);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 24px; margin: 0 auto 20px;
+  }
+  .login-box h2 { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+  .login-box p  { font-size: 14px; color: var(--text-2); margin-bottom: 24px; }
+  .login-input {
+    width: 100%; border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 12px 14px; font-size: 16px; font-family: inherit;
+    color: var(--text); background: var(--surface-2); outline: none;
+    transition: border-color 0.15s; margin-bottom: 12px;
+  }
+  .login-input:focus { border-color: var(--green); }
+  .login-btn {
+    width: 100%; padding: 13px; border: none; border-radius: var(--radius-sm);
+    background: var(--green); color: #fff; font-size: 16px; font-weight: 700;
+    font-family: inherit; cursor: pointer; transition: opacity 0.15s;
+  }
+  .login-btn:hover { opacity: 0.88; }
+
+  /* ── 看板 ── */
+  #board { display: none; }
+
+  .topbar {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 24px;
+    display: flex; align-items: center; justify-content: space-between;
+    position: sticky; top: 0; z-index: 10;
+  }
+  .topbar-left { display: flex; align-items: center; gap: 10px; }
+  .topbar-left h1 { font-size: 17px; font-weight: 700; }
+  .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; flex-shrink: 0; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+  .topbar-right { display: flex; align-items: center; gap: 10px; }
+  .driver-chip {
+    background: var(--green-dim); border: 1px solid rgba(6,199,85,0.25);
+    border-radius: 20px; padding: 5px 12px; font-size: 13px; color: var(--green);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .btn-change {
+    font-size: 12px; color: var(--text-3); background: none; border: none;
+    cursor: pointer; font-family: inherit; padding: 4px 8px;
+    border-radius: 6px; transition: background 0.12s;
+  }
+  .btn-change:hover { background: var(--surface-2); color: var(--text-2); }
+
+  /* 統計 */
+  .stats-bar {
+    display: flex; gap: 12px; padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  .stat-chip {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 10px 18px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .stat-num { font-size: 22px; font-weight: 700; }
+  .stat-label { font-size: 12px; color: var(--text-2); margin-top: 1px; }
+  .num-amber { color: var(--amber); }
+  .num-green { color: var(--green); }
+  .num-blue  { color: var(--blue); }
+
+  /* 欄位 */
+  .columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    min-height: calc(100vh - 130px);
+  }
+  .col {
+    padding: 20px 24px;
+    border-right: 1px solid var(--border);
+  }
+  .col:last-child { border-right: none; }
+  .col-header {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 16px;
+  }
+  .col-title { font-size: 14px; font-weight: 700; color: var(--text-2); letter-spacing: 0.5px; }
+  .col-count {
+    font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px;
+  }
+  .count-amber { background: var(--amber-dim); color: var(--amber); }
+  .count-green { background: var(--green-dim); color: var(--green); }
+  .count-blue  { background: var(--blue-dim);  color: var(--blue); }
+
+  /* 訂單卡片 */
+  .order-card {
+    border-radius: var(--radius); padding: 16px; margin-bottom: 12px;
+    border: 1px solid var(--border); transition: border-color 0.15s;
+  }
+  .pending-card { background: var(--surface); border-left: 3px solid var(--amber); }
+  .mine-card    { background: var(--surface); border-left: 3px solid var(--green); }
+  .other-card   { background: var(--surface-2); opacity: 0.7; }
+
+  .card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+  .card-shop  { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
+  .card-items { font-size: 14px; color: var(--text-2); margin-bottom: 4px; }
+  .card-addr  { font-size: 13px; color: var(--text-3); }
+  .card-time  { font-size: 13px; color: var(--text-3); white-space: nowrap; flex-shrink: 0; }
+  .other-driver { font-size: 14px; font-weight: 400; color: var(--text-3); }
+
+  .card-action { display: flex; justify-content: flex-end; }
+
+  .btn-accept {
+    background: var(--green); color: #fff; border: none; border-radius: var(--radius-sm);
+    padding: 10px 28px; font-size: 15px; font-weight: 700; cursor: pointer;
+    font-family: inherit; transition: opacity 0.15s; letter-spacing: 0.5px;
+  }
+  .btn-accept:hover:not(:disabled) { opacity: 0.85; }
+  .btn-accept:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .btn-secondary {
+    background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 9px 20px; font-size: 14px; font-weight: 500;
+    cursor: pointer; font-family: inherit; transition: border-color 0.15s;
+  }
+  .btn-secondary:hover { border-color: rgba(255,255,255,0.2); }
+
+  .btn-done {
+    background: rgba(96,165,250,0.15); color: var(--blue);
+    border: 1px solid rgba(96,165,250,0.3); border-radius: var(--radius-sm);
+    padding: 9px 20px; font-size: 14px; font-weight: 700;
+    cursor: pointer; font-family: inherit; transition: background 0.15s;
+  }
+  .btn-done:hover { background: rgba(96,165,250,0.25); }
+
+  .status-pill { font-size: 12px; font-weight: 500; padding: 4px 10px; border-radius: 20px; white-space: nowrap; flex-shrink: 0; }
+  .pill-accepted   { background: var(--green-dim); color: var(--green); }
+  .pill-delivering { background: var(--blue-dim);  color: var(--blue); }
+  .pill-other      { background: var(--surface-2); color: var(--text-3); }
+
+  .empty-state { text-align: center; padding: 32px 20px; color: var(--text-3); font-size: 14px; }
+
+  /* 右欄分成「我的」和「其他人」 */
+  .sub-section { margin-bottom: 24px; }
+  .sub-label { font-size: 12px; color: var(--text-3); margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+
+  @media (max-width: 640px) {
+    .columns { grid-template-columns: 1fr; }
+    .col { border-right: none; border-bottom: 1px solid var(--border); }
+    .stats-bar { flex-wrap: wrap; gap: 8px; padding: 12px 16px; }
+    .topbar { padding: 12px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- 登入畫面 -->
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-icon">🛵</div>
+    <h2>美食街外送看板</h2>
+    <p>請輸入你的姓名開始接單</p>
+    <input class="login-input" id="driver-name-input" type="text" placeholder="例：陳志明" maxlength="10" autofocus>
+    <button class="login-btn" onclick="enterBoard()">進入看板</button>
+  </div>
+</div>
+
+<!-- 主看板 -->
+<div id="board">
+  <div class="topbar">
+    <div class="topbar-left">
+      <div class="live-dot"></div>
+      <h1>美食街外送看板</h1>
+    </div>
+    <div class="topbar-right">
+      <div class="driver-chip">
+        <span>外送員：</span>
+        <strong id="driver-label"></strong>
+      </div>
+      <button class="btn-change" onclick="changeName()">換人</button>
+    </div>
+  </div>
+
+  <div class="stats-bar">
+    <div class="stat-chip">
+      <div class="stat-num num-amber" id="cnt-pending">—</div>
+      <div class="stat-label">待接單</div>
+    </div>
+    <div class="stat-chip">
+      <div class="stat-num num-green" id="cnt-mine">—</div>
+      <div class="stat-label">我的訂單</div>
+    </div>
+    <div class="stat-chip">
+      <div class="stat-num num-blue" id="cnt-done">—</div>
+      <div class="stat-label">今日完成</div>
+    </div>
+  </div>
+
+  <div class="columns">
+    <!-- 左欄：待接單 -->
+    <div class="col">
+      <div class="col-header">
+        <span class="col-title">待接單</span>
+        <span class="col-count count-amber" id="cnt-pending-badge">0</span>
+      </div>
+      <div id="pending-list"></div>
+    </div>
+
+    <!-- 右欄：進行中 -->
+    <div class="col">
+      <div class="col-header">
+        <span class="col-title">進行中</span>
+      </div>
+      <div class="sub-section">
+        <div class="sub-label">我的訂單</div>
+        <div id="mine-list"></div>
+      </div>
+      <div class="sub-section">
+        <div class="sub-label">其他外送員</div>
+        <div id="other-list"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // 同步 badge 數字
+  const obs = new MutationObserver(() => {
+    const cards = document.querySelectorAll('#pending-list .order-card');
+    const badge = document.getElementById('cnt-pending-badge');
+    if (badge) badge.textContent = cards.length;
+  });
+  const pendingList = document.getElementById('pending-list');
+  if (pendingList) obs.observe(pendingList, { childList: true });
+</script>
+
+</body>
+</html>
