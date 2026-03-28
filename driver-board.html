@@ -108,13 +108,15 @@
               <div class="card-items">${o.items}</div>
               <div class="card-tags">
                 ${o.distance ? '<span class="ctag ctag-blue">📍 ' + o.distance + ' 公里</span>' : ''}
-                ${o.deliveryTime ? '<span class="ctag ctag-amber">⏰ ' + o.deliveryTime + '</span>' : ''}
                 ${o.amount ? '<span class="ctag ctag-green">💰 $' + o.amount + '</span>' : ''}
                 ${o.deliveryFee ? '<span class="ctag ctag-gray">外送費 $' + o.deliveryFee + '</span>' : ''}
                 ${o.note ? '<span class="ctag ctag-gray">備註：' + o.note + '</span>' : ''}
               </div>
             </div>
-            <div class="card-time">${formatTime(o.createdAt)}</div>
+            <div class="card-time">
+                <div class="time-row"><span class="time-label">建立</span>${formatTime(o.createdAt)}</div>
+                ${o.deliveryTime ? '<div class="time-row time-deadline"><span class="time-label">送達</span>' + o.deliveryTime + '</div>' : ''}
+              </div>
           </div>
           <div class="card-action">
             <button class="btn-accept" id="btn-${o.id}" onclick="acceptOrder('${o.id}')">接單</button>
@@ -139,15 +141,17 @@
                 <div class="card-items">${o.items}</div>
                 <div class="card-tags">
                   ${o.distance ? '<span class="ctag ctag-blue">📍 ' + o.distance + ' 公里</span>' : ''}
-                  ${o.deliveryTime ? '<span class="ctag ctag-amber">⏰ ' + o.deliveryTime + '</span>' : ''}
-                  ${o.amount ? '<span class="ctag ctag-green">💰 $' + o.amount + '</span>' : ''}
+                    ${o.amount ? '<span class="ctag ctag-green">💰 $' + o.amount + '</span>' : ''}
                   ${o.deliveryFee ? '<span class="ctag ctag-gray">外送費 $' + o.deliveryFee + '</span>' : ''}
                   ${o.note ? '<span class="ctag ctag-gray">備註：' + o.note + '</span>' : ''}
                 </div>
               </div>
-              <span class="status-pill ${isDelivering ? 'pill-delivering' : 'pill-accepted'}">
-                ${isDelivering ? '配送中' : '已接單'}
-              </span>
+              <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0">
+                <span class="status-pill \${isDelivering ? 'pill-delivering' : 'pill-accepted'}">
+                  \${isDelivering ? '配送中' : '已接單'}
+                </span>
+                \${o.deliveryTime ? '<div class="time-deadline" style="font-size:12px;text-align:right">送達 ' + o.deliveryTime + '</div>' : ''}
+              </div>
             </div>
             <div class="card-action">
               ${!isDelivering
@@ -377,6 +381,9 @@
 
   .empty-state { text-align: center; padding: 32px 20px; color: var(--text-3); font-size: 14px; }
   .card-pickup { font-weight: 400; color: var(--text-2); font-size: 15px; }
+  .time-row { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-3); white-space: nowrap; justify-content: flex-end; }
+  .time-label { font-size: 10px; background: #2a2d3a; padding: 1px 5px; border-radius: 4px; color: var(--text-3); }
+  .time-deadline { color: #f59e0b; font-weight: 500; }
   .card-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .ctag { font-size: 12px; padding: 3px 10px; border-radius: 20px; font-weight: 500; }
   .ctag-blue  { background: #1a2a3a; color: #60a5fa; }
