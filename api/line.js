@@ -57,6 +57,7 @@ export default async function handler(req, res) {
   function buildFlex(order) {
     const rows = [
       { label: '店家',     value: order.shop },
+      order.customer    ? { label: '顧客',     value: order.customer } : null,
       order.pickupNumber ? { label: '取餐號碼', value: order.pickupNumber } : null,
       { label: '品項',     value: order.items },
       { label: '地址',     value: order.address },
@@ -236,6 +237,7 @@ export default async function handler(req, res) {
                 amount:       doc.fields?.amount?.stringValue || '',
                 deliveryFee:  doc.fields?.deliveryFee?.stringValue || '',
                 note:         doc.fields?.note?.stringValue || '',
+                customer:     doc.fields?.customer?.stringValue || '',
               };
 
               // 先廣播棄單訊息
