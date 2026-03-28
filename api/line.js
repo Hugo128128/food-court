@@ -57,19 +57,19 @@ export default async function handler(req, res) {
   function buildFlex(order) {
     const rows = [
       { label: '店家',     value: order.shop },
+      order.pickupNumber ? { label: '取餐號碼', value: order.pickupNumber } : null,
       { label: '品項',     value: order.items },
       { label: '地址',     value: order.address },
       order.distance     ? { label: '距離',     value: `約 ${order.distance} 公里` } : null,
       order.deliveryTime ? { label: '送達時間', value: order.deliveryTime } : null,
       order.amount       ? { label: '訂單金額', value: `$${order.amount}` } : null,
       order.deliveryFee  ? { label: '外送費',   value: `$${order.deliveryFee}` } : null,
-      order.pickupNumber ? { label: '取餐號碼', value: order.pickupNumber } : null,
-    order.note         ? { label: '備註',     value: order.note } : null,
+      order.note         ? { label: '備註',     value: order.note } : null,
     ].filter(Boolean);
 
     return {
       type: 'flex',
-      altText: `🛵 新訂單 #${order.shortId} — ${order.shop}`,
+      altText: `🛵 新訂單 ${order.shop}${order.pickupNumber ? '-' + order.pickupNumber : ''} — Mula Kitchens`,
       contents: {
         type: 'bubble',
         header: {
@@ -78,8 +78,8 @@ export default async function handler(req, res) {
           backgroundColor: '#06C755',
           paddingAll: '16px',
           contents: [
-            { type: 'text', text: `🛵 新訂單 #${order.shortId}`, color: '#ffffff', weight: 'bold', size: 'lg' },
-            { type: 'text', text: '美食街外送系統', color: '#ccffdd', size: 'xs', margin: 'xs' },
+            { type: 'text', text: `🛵 ${order.shop}${order.pickupNumber ? ' #' + order.pickupNumber : ''}`, color: '#ffffff', weight: 'bold', size: 'lg', wrap: true },
+            { type: 'text', text: 'Mula Kitchens 外送派單系統', color: '#ccffdd', size: 'xs', margin: 'xs' },
           ],
         },
         body: {
