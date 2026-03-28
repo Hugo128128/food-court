@@ -144,24 +144,61 @@ export default async function handler(req, res) {
         const orderId = params.get('orderId');
 
         if (action === 'accept' && orderId) {
-          // 取得外送員 LINE 名稱
           const driverName = await getDisplayName(event.source.groupId, event.source.userId);
-
           try {
             const doc = await getOrder(orderId);
             const currentStatus = doc.fields?.status?.stringValue;
+            const shop = doc.fields?.shop?.stringValue || '';
+            const pickupNumber = doc.fields?.pickupNumber?.stringValue || '';
+            const shortId = orderId.slice(-6).toUpperCase();
 
             if (currentStatus === 'pending') {
-              // 更新訂單狀態
               await updateOrder(orderId, { status: 'accepted', driver: driverName });
 
-              // 廣播接單成功
+              // 廣播接單成功（含棄單按鈕）
               await sendToGroup([{
-                type: 'text',
-                text: `✅ ${driverName} 已接單！\n訂單 #${orderId.slice(-6).toUpperCase()} — ${doc.fields?.shop?.stringValue || ''}\n\n請其他外送員勿重複接單。`,
+                type: 'flex',
+                altText: `✅ ${driverName} 已接單 — ${shop}${pickupNumber ? ' #' + pickupNumber : ''}`,
+                contents: {
+                  type: 'bubble',
+                  header: {
+                    type: 'box',
+                    layout: 'vertical',
+                    backgroundColor: '#1a1a18',
+                    paddingAll: '14px',
+                    contents: [
+                      { type: 'text', text: `✅ ${driverName} 已接單`, color: '#ffffff', weight: 'bold', size: 'md' },
+                      { type: 'text', text: `${shop}${pickupNumber ? ' #' + pickupNumber : ''} — #${shortId}`, color: '#aaaaaa', size: 'xs', margin: 'xs' },
+                    ],
+                  },
+                  body: {
+                    type: 'box',
+                    layout: 'vertical',
+                    paddingAll: '14px',
+                    contents: [
+                      { type: 'text', text: '請其他外送員勿重複接單', color: '#888888', size: 'sm', wrap: true },
+                    ],
+                  },
+                  footer: {
+                    type: 'box',
+                    layout: 'horizontal',
+                    paddingAll: '12px',
+                    contents: [
+                      {
+                        type: 'button',
+                        style: 'secondary',
+                        height: 'sm',
+                        action: {
+                          type: 'postback',
+                          label: '棄單',
+                          data: `action=drop&orderId=${orderId}&driverName=${encodeURIComponent(driverName)}`,
+                        },
+                      },
+                    ],
+                  },
+                },
               }]);
             } else {
-              // 已被別人接了
               const takenBy = doc.fields?.driver?.stringValue || '其他外送員';
               await sendToGroup([{
                 type: 'text',
@@ -170,6 +207,49 @@ export default async function handler(req, res) {
             }
           } catch(e) {
             console.error('處理接單失敗：', e.message);
+          }
+        }
+
+        // 外送員按「棄單」
+        if (action === 'drop' && orderId) {
+          const driverName = decodeURIComponent(params.get('driverName') || '外送員');
+          try {
+            const doc = await getOrder(orderId);
+            const currentStatus = doc.fields?.status?.stringValue;
+            const shop = doc.fields?.shop?.stringValue || '';
+            const pickupNumber = doc.fields?.pickupNumber?.stringValue || '';
+
+            if (currentStatus === 'accepted') {
+              // 回到待接單
+              await updateOrder(orderId, { status: 'pending', driver: '' });
+
+              // 取得完整訂單資料重新發派單通知
+              const order = {
+                id: orderId,
+                shortId: orderId.slice(-6).toUpperCase(),
+                shop,
+                pickupNumber,
+                items:        doc.fields?.items?.stringValue || '',
+                address:      doc.fields?.address?.stringValue || '',
+                distance:     doc.fields?.distance?.stringValue || '',
+                deliveryTime: doc.fields?.deliveryTime?.stringValue || '',
+                amount:       doc.fields?.amount?.stringValue || '',
+                deliveryFee:  doc.fields?.deliveryFee?.stringValue || '',
+                note:         doc.fields?.note?.stringValue || '',
+              };
+
+              // 先廣播棄單訊息
+              await sendToGroup([{
+                type: 'text',
+                text: `🔄 ${driverName} 已棄單
+${shop}${pickupNumber ? ' #' + pickupNumber : ''} 重新開放接單`,
+              }]);
+
+              // 重新發派單 Flex Message
+              await sendToGroup([buildFlex(order)]);
+            }
+          } catch(e) {
+            console.error('處理棄單失敗：', e.message);
           }
         }
       }
