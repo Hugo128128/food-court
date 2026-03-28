@@ -22,9 +22,7 @@
   const db = getFirestore(app);
 
   const API_URL = 'https://food-court-tau.vercel.app/api/line';
-  const ORIGIN  = { lat: 24.1636, lng: 120.6436 };
-
-  const STATUS = {
+    const STATUS = {
     pending:    { label: '待接單', cls: 'badge-pending' },
     accepted:   { label: '已接單', cls: 'badge-accepted' },
     delivering: { label: '配送中', cls: 'badge-delivering' },
@@ -44,12 +42,14 @@
   });
 
   const GOOGLE_MAPS_KEY = 'AIzaSyANiGx2gHrZAk5V751mXhp6zajIWTE2Xyk';
+  const ORIGIN_ADDRESS  = '臺中市西屯區國安一路128號';
+  let   ORIGIN = null; // 啟動時自動查詢
 
   // 地理編碼（Google Maps Geocoding API）
   async function geocode(address) {
     try {
       const r = await fetch(
-        `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address + ' 台灣')}&key=${GOOGLE_MAPS_KEY}&language=zh-TW`
+        `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_MAPS_KEY}&language=zh-TW&region=TW`
       );
       const d = await r.json();
       if (d.status === 'OK' && d.results?.[0]) {
@@ -59,6 +59,12 @@
     } catch(e) {}
     return null;
   }
+
+  // 啟動時查出美食街座標
+  (async () => {
+    ORIGIN = await geocode(ORIGIN_ADDRESS);
+    if (!ORIGIN) ORIGIN = { lat: 24.1636, lng: 120.6436 }; // fallback
+  })();
 
   function calcDistance(lat1, lng1, lat2, lng2) {
     const R = 6371, dLat = (lat2-lat1)*Math.PI/180, dLng = (lng2-lng1)*Math.PI/180;
@@ -73,11 +79,12 @@
     if (address.length < 5) { distEl.textContent=''; mapEl.style.display='none'; return; }
     distEl.textContent = '計算中...';
     const coord = await geocode(address);
-    if (coord) {
+    if (coord && ORIGIN) {
       const km = calcDistance(ORIGIN.lat, ORIGIN.lng, coord.lat, coord.lng);
       distEl.textContent = `📍 距離美食街約 ${km} 公里`;
       distEl.dataset.km = km;
-      mapEl.href = `https://www.google.com/maps/dir/${ORIGIN.lat},${ORIGIN.lng}/${coord.lat},${coord.lng}`;
+      // 地圖連結：起點用地址文字，終點用座標，導航更準確
+      mapEl.href = `https://www.google.com/maps/dir/${encodeURIComponent(ORIGIN_ADDRESS)}/${coord.lat},${coord.lng}`;
       mapEl.style.display = 'inline';
     } else {
       distEl.textContent = '⚠️ 找不到此地址，請確認後重試';
@@ -430,9 +437,15 @@
       <h2>新增訂單</h2>
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
-    <div class="form-group">
-      <label class="form-label">店家名稱 <span class="req">*</span></label>
-      <input class="form-input" id="f-shop" type="text" placeholder="例：港式飲茶">
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">店家名稱 <span class="req">*</span></label>
+        <input class="form-input" id="f-shop" type="text" placeholder="例：港式飲茶">
+      </div>
+      <div class="form-group">
+        <label class="form-label">取餐號碼</label>
+        <input class="form-input" id="f-pickup-number" type="text" placeholder="例：A012、38號">
+      </div>
     </div>
     <div class="form-group">
       <label class="form-label">品項內容 <span class="req">*</span></label>
@@ -465,10 +478,6 @@
         <label class="form-label">備註</label>
         <input class="form-input" id="f-note" type="text" placeholder="例：門口按對講機">
       </div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">取餐號碼</label>
-      <input class="form-input" id="f-pickup-number" type="text" placeholder="例：A012、38號">
     </div>
     <div class="form-actions">
       <button class="btn-cancel" onclick="closeModal()">取消</button>
