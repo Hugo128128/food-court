@@ -172,7 +172,7 @@
           order: {
             id: docRef.id,
             shortId: docRef.id.slice(-6).toUpperCase(),
-            shop, items, address, note, deliveryTime, deliveryFee, amount, distance, pickupNumber, customer, customer,
+            shop, items, address, note, deliveryTime, deliveryFee, amount, distance, pickupNumber, customer,
           }
         }),
       });
@@ -286,7 +286,7 @@
         <div class="order-top">
           <div class="order-meta">
             <div class="order-id">#${o.id.slice(-6).toUpperCase()} &nbsp;·&nbsp; ${o.address}${o.customer ? ' &nbsp;·&nbsp; ' + o.customer : ''}</div>
-            <div class="order-shop">${o.shop}${o.pickupNumber ? \` <span style="font-weight:400;color:var(--text-2)">${o.pickupNumber}</span>\` : ''}</div>
+            <div class="order-shop">${o.shop}${o.pickupNumber ? ' <span style="font-weight:400;color:var(--text-2)">' + o.pickupNumber + '</span>' : ''}</div>
             <div class="order-items">${o.items}${o.note?` <span class="order-note">· 備註：${o.note}</span>`:''}</div>
             ${tags?`<div class="order-tags">${tags}</div>`:''}
           </div>
