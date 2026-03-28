@@ -63,7 +63,8 @@ export default async function handler(req, res) {
       order.deliveryTime ? { label: '送達時間', value: order.deliveryTime } : null,
       order.amount       ? { label: '訂單金額', value: `$${order.amount}` } : null,
       order.deliveryFee  ? { label: '外送費',   value: `$${order.deliveryFee}` } : null,
-      order.note         ? { label: '備註',     value: order.note } : null,
+      order.pickupNumber ? { label: '取餐號碼', value: order.pickupNumber } : null,
+    order.note         ? { label: '備註',     value: order.note } : null,
     ].filter(Boolean);
 
     return {
