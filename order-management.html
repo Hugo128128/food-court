@@ -151,6 +151,7 @@
     const amount       = document.getElementById('f-amount').value.trim();
     const distance     = document.getElementById('distance-result').dataset.km || '';
     const pickupNumber = document.getElementById('f-pickup-number').value.trim();
+    const customer     = document.getElementById('f-customer').value.trim();
 
     if (!shop || !items || !address) { alert('請填寫店家、品項、送達地址'); return; }
 
@@ -159,7 +160,7 @@
 
     try {
       const docRef = await addDoc(collection(db, 'orders'), {
-        shop, items, address, note, deliveryTime, deliveryFee, amount, distance, pickupNumber,
+        shop, items, address, note, deliveryTime, deliveryFee, amount, distance, pickupNumber, customer,
         status: 'pending', driver: '', createdAt: serverTimestamp(),
       });
 
@@ -171,12 +172,12 @@
           order: {
             id: docRef.id,
             shortId: docRef.id.slice(-6).toUpperCase(),
-            shop, items, address, note, deliveryTime, deliveryFee, amount, distance, pickupNumber,
+            shop, items, address, note, deliveryTime, deliveryFee, amount, distance, pickupNumber, customer, customer,
           }
         }),
       });
 
-      ['f-shop','f-items','f-address','f-note','f-delivery-fee','f-amount','f-pickup-number'].forEach(id => document.getElementById(id).value='');
+      ['f-shop','f-items','f-address','f-note','f-delivery-fee','f-amount','f-pickup-number','f-customer'].forEach(id => document.getElementById(id).value='');
       document.getElementById('f-delivery-time').value = '';
       document.getElementById('distance-result').textContent = '';
       document.getElementById('map-link').style.display = 'none';
@@ -220,7 +221,7 @@
             shop: order.shop, items: order.items, address: order.address,
             note: order.note, deliveryTime: order.deliveryTime,
             deliveryFee: order.deliveryFee, amount: order.amount,
-            distance: order.distance, pickupNumber: order.pickupNumber,
+            distance: order.distance, pickupNumber: order.pickupNumber, customer: order.customer,
           }
         }),
       });
@@ -284,8 +285,8 @@
       return `<div class="order-card">
         <div class="order-top">
           <div class="order-meta">
-            <div class="order-id">#${o.id.slice(-6).toUpperCase()} &nbsp;·&nbsp; ${o.address}</div>
-            <div class="order-shop">${o.shop}</div>
+            <div class="order-id">#${o.id.slice(-6).toUpperCase()} &nbsp;·&nbsp; ${o.address}${o.customer ? ' &nbsp;·&nbsp; ' + o.customer : ''}</div>
+            <div class="order-shop">${o.shop}${o.pickupNumber ? \` <span style="font-weight:400;color:var(--text-2)">${o.pickupNumber}</span>\` : ''}</div>
             <div class="order-items">${o.items}${o.note?` <span class="order-note">· 備註：${o.note}</span>`:''}</div>
             ${tags?`<div class="order-tags">${tags}</div>`:''}
           </div>
@@ -446,6 +447,10 @@
         <label class="form-label">取餐號碼</label>
         <input class="form-input" id="f-pickup-number" type="text" placeholder="例：A012、38號" oninput="updateOrderTitle()">
       </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">顧客姓名／公司名稱</label>
+      <input class="form-input" id="f-customer" type="text" placeholder="例：王小明、台積電">
     </div>
     <div class="form-group">
       <label class="form-label">品項內容 <span class="req">*</span></label>
