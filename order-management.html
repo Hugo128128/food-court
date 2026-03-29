@@ -194,8 +194,7 @@ ${text}`
       document.getElementById('import-result').style.display = 'block';
       document.getElementById('import-result').dataset.parsed = JSON.stringify(parsed);
     } catch(e) {
-      alert('解析失敗，請確認內容或重試
-' + e.message);
+      alert('解析失敗，請確認內容或重試\n' + e.message);
     }
     btn.disabled = false; btn.textContent = '🤖 AI 解析';
   };
