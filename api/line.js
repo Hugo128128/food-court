@@ -50,17 +50,20 @@ export default async function handler(req, res) {
 
   // 派單卡片（待接單狀態）
   function buildPendingFlex(order) {
+    // 店家＋顧客＋取餐號碼合一行
+    const shopLine = [order.shop, order.customer, order.pickupNumber ? '#'+order.pickupNumber : ''].filter(Boolean).join('  ');
+    // 金額合一行
+    const amountLine = [order.amount ? '訂單 $'+order.amount : '', order.deliveryFee ? '外送費 $'+order.deliveryFee : ''].filter(Boolean).join('　');
     const rows = [
-      { label: '店家',     value: order.shop },
-      order.customer     ? { label: '顧客',     value: order.customer } : null,
-      order.pickupNumber ? { label: '取餐號碼', value: order.pickupNumber } : null,
+      { label: '取餐',     value: shopLine },
       { label: '品項',     value: order.items },
       { label: '地址',     value: order.address },
-      order.distance     ? { label: '距離',     value: `約 ${order.distance} 公里` } : null,
-      order.deliveryTime ? { label: '送達時間', value: order.deliveryTime } : null,
-      order.amount       ? { label: '訂單金額', value: `$${order.amount}` } : null,
-      order.deliveryFee  ? { label: '外送費',   value: `$${order.deliveryFee}` } : null,
-      order.note         ? { label: '備註',     value: order.note } : null,
+      order.distance     ? { label: '距離',   value: `約 ${order.distance} 公里` } : null,
+      order.deliveryTime ? { label: '時間',   value: order.deliveryTime } : null,
+      amountLine         ? { label: '費用',   value: amountLine } : null,
+      order.note         ? { label: '備註',   value: order.note } : null,
+      order.orderOpts    ? { label: '特殊',   value: order.orderOpts } : null,
+      order.cashPayment==='是' ? { label: '付款', value: '💵 需收現金' } : null,
     ].filter(Boolean);
 
     const mapsUrl = `https://www.google.com/maps/dir/${ORIGIN_ADDRESS}/${encodeURIComponent(order.address)}`;
@@ -129,16 +132,17 @@ export default async function handler(req, res) {
 
   // 已接單卡片（顯示接單人，無按鈕）
   function buildAcceptedFlex(order, driverName) {
+    const shopLine2 = [order.shop, order.customer, order.pickupNumber ? '#'+order.pickupNumber : ''].filter(Boolean).join('  ');
+    const amountLine2 = [order.amount ? '訂單 $'+order.amount : '', order.deliveryFee ? '外送費 $'+order.deliveryFee : ''].filter(Boolean).join('　');
     const rows = [
-      { label: '店家',     value: order.shop },
-      order.customer     ? { label: '顧客',     value: order.customer } : null,
-      order.pickupNumber ? { label: '取餐號碼', value: order.pickupNumber } : null,
-      { label: '品項',     value: order.items },
-      { label: '地址',     value: order.address },
-      order.distance     ? { label: '距離',     value: `約 ${order.distance} 公里` } : null,
-      order.deliveryTime ? { label: '送達時間', value: order.deliveryTime } : null,
-      order.amount       ? { label: '訂單金額', value: `$${order.amount}` } : null,
-      order.deliveryFee  ? { label: '外送費',   value: `$${order.deliveryFee}` } : null,
+      { label: '取餐',   value: shopLine2 },
+      { label: '品項',   value: order.items },
+      { label: '地址',   value: order.address },
+      order.distance     ? { label: '距離', value: `約 ${order.distance} 公里` } : null,
+      order.deliveryTime ? { label: '時間', value: order.deliveryTime } : null,
+      amountLine2        ? { label: '費用', value: amountLine2 } : null,
+      order.orderOpts    ? { label: '特殊', value: order.orderOpts } : null,
+      order.cashPayment==='是' ? { label: '付款', value: '💵 需收現金' } : null,
     ].filter(Boolean);
 
     return {
@@ -232,36 +236,50 @@ export default async function handler(req, res) {
                 note:         fullDoc.fields?.note?.stringValue || '',
               };
 
-              // 發送已接單卡片（灰色，顯示接單人，無接單按鈕）+ 棄單按鈕
-              await sendToGroup([
-                buildAcceptedFlex(order, driverName),
-                {
-                  type: 'flex',
-                  altText: `${driverName} 如需棄單請點此`,
-                  contents: {
-                    type: 'bubble',
-                    body: {
-                      type: 'box',
-                      layout: 'horizontal',
-                      paddingAll: '12px',
-                      contents: [
-                        { type: 'text', text: `${driverName}，如需棄單：`, color: '#888888', size: 'sm', flex: 5, gravity: 'center' },
-                        {
-                          type: 'button',
-                          style: 'secondary',
-                          height: 'sm',
-                          flex: 3,
-                          action: {
-                            type: 'postback',
-                            label: '棄單',
-                            data: `action=drop&orderId=${orderId}&driverName=${encodeURIComponent(driverName)}`,
-                          },
-                        },
-                      ],
-                    },
+              // 發送已接單卡片（含棄單按鈕，合為一張卡）
+              await sendToGroup([{
+                type: 'flex',
+                altText: `✅ ${driverName} 已接單 — ${shop}${pickupNumber ? ' #'+pickupNumber : ''}`,
+                contents: {
+                  type: 'bubble',
+                  header: {
+                    type: 'box',
+                    layout: 'vertical',
+                    backgroundColor: '#333333',
+                    paddingAll: '14px',
+                    contents: [
+                      { type: 'text', text: `✅ 已由 ${driverName} 接單`, color: '#ffffff', weight: 'bold', size: 'md' },
+                      { type: 'text', text: `${shop}${pickupNumber ? ' #'+pickupNumber : ''} — 請勿重複接單`, color: '#aaaaaa', size: 'xs', margin: 'xs', wrap: true },
+                    ],
+                  },
+                  body: {
+                    type: 'box',
+                    layout: 'vertical',
+                    spacing: 'md',
+                    paddingAll: '14px',
+                    contents: [
+                      ...buildAcceptedFlex(order, driverName).contents.body.contents,
+                      { type: 'separator', margin: 'md' },
+                      { type: 'text', text: `${driverName}，請回覆預計到商場取餐的時間 🕐`, color: '#888888', size: 'sm', wrap: true, margin: 'md' },
+                    ],
+                  },
+                  footer: {
+                    type: 'box',
+                    layout: 'horizontal',
+                    paddingAll: '12px',
+                    contents: [{
+                      type: 'button',
+                      style: 'secondary',
+                      height: 'sm',
+                      action: {
+                        type: 'postback',
+                        label: '棄單',
+                        data: `action=drop&orderId=${orderId}&driverName=${encodeURIComponent(driverName)}`,
+                      },
+                    }],
                   },
                 },
-              ]);
+              }]);
             } else {
               // 已被別人接了
               const takenBy = docSnap.fields?.driver?.stringValue || '其他外送員';
@@ -281,6 +299,17 @@ export default async function handler(req, res) {
           try {
             const docSnap = await getOrder(orderId);
             const currentStatus = docSnap.fields?.status?.stringValue;
+            const actualDriver  = docSnap.fields?.driver?.stringValue || '';
+
+            // 驗證：只有接單本人才能棄單
+            const presserName = await getDisplayName(event.source.groupId, event.source.userId);
+            if (presserName !== actualDriver) {
+              await sendToGroup([{
+                type: 'text',
+                text: `⚠️ ${presserName}，此訂單由 ${actualDriver} 接單，只有接單人才能棄單。`,
+              }]);
+              continue;
+            }
 
             if (currentStatus === 'accepted') {
               await updateOrder(orderId, { status: 'pending', driver: '' });
