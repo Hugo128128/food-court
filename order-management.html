@@ -85,9 +85,13 @@
     return (R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))).toFixed(1);
   }
 
-  window.onAddressInput = async () => {
+  let _addrTimer = null;
+  window.onAddressInput = () => {
+    const distEl = document.getElementById('distance-result');
+    distEl.textContent = '';
+    clearTimeout(_addrTimer);
+    _addrTimer = setTimeout(async () => {
     const address = document.getElementById('f-address').value.trim();
-    const distEl  = document.getElementById('distance-result');
     const mapEl   = document.getElementById('map-link');
     if (address.length < 5) { distEl.textContent=''; mapEl.style.display='none'; return; }
     distEl.textContent = '計算中...';
@@ -105,6 +109,7 @@
     } else {
       distEl.textContent = '⚠️ 找不到此地址，請確認後重試';
     }
+    }, 1500); // 停止打字 1.5 秒後才呼叫 API
   };
 
   function buildTimeOptions() {
@@ -113,10 +118,12 @@
     const now = new Date();
     const todayStr = (now.getMonth()+1) + '/' + now.getDate();
 
-    // 今天：從現在起每15分鐘，到23:45
+    // 今天：從現在或09:00取較晚，到23:00
     const startToday = new Date(now);
     startToday.setMinutes(Math.ceil(now.getMinutes()/15)*15, 0, 0);
-    const endToday = new Date(now); endToday.setHours(23,45,0,0);
+    const nineAM = new Date(now); nineAM.setHours(9,0,0,0);
+    if (startToday < nineAM) startToday.setHours(9,0,0,0);
+    const endToday = new Date(now); endToday.setHours(23,0,0,0);
     const grpToday = document.createElement('optgroup');
     grpToday.label = '今天 ' + todayStr;
     sel.appendChild(grpToday);
@@ -129,14 +136,14 @@
       t = new Date(t.getTime() + 15*60000);
     }
 
-    // 明天：全天 00:00 ~ 23:45
+    // 明天：09:00 ~ 23:00
     const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate()+1);
     const tomorrowStr = (tomorrow.getMonth()+1) + '/' + tomorrow.getDate();
     const grpTomorrow = document.createElement('optgroup');
     grpTomorrow.label = '明天 ' + tomorrowStr;
     sel.appendChild(grpTomorrow);
-    const startTm = new Date(tomorrow); startTm.setHours(0,0,0,0);
-    const endTm = new Date(tomorrow); endTm.setHours(23,45,0,0);
+    const startTm = new Date(tomorrow); startTm.setHours(9,0,0,0);
+    const endTm = new Date(tomorrow); endTm.setHours(23,0,0,0);
     t = new Date(startTm);
     while (t <= endTm) {
       const opt = document.createElement('option');
@@ -663,15 +670,9 @@ ${text}`
         <input class="form-input" id="f-pickup-number" type="text" placeholder="例：A012、38號" oninput="updateOrderTitle()">
       </div>
     </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">顧客姓名／公司名稱</label>
-        <input class="form-input" id="f-customer" type="text" placeholder="例：王小明、台積電">
-      </div>
-      <div class="form-group">
-        <label class="form-label">建檔人員（選填）</label>
-        <input class="form-input" id="f-staff" type="text" placeholder="例：小美">
-      </div>
+    <div class="form-group">
+      <label class="form-label">顧客姓名／公司名稱</label>
+      <input class="form-input" id="f-customer" type="text" placeholder="例：王小明、台積電">
     </div>
     <div class="form-group">
       <label class="form-label">品項內容 <span class="req">*</span></label>
@@ -704,6 +705,10 @@ ${text}`
         <label class="form-label">備註</label>
         <input class="form-input" id="f-note" type="text" placeholder="例：門口按對講機">
       </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">建檔人員（選填）</label>
+      <input class="form-input" id="f-staff" type="text" placeholder="例：Hugo">
     </div>
     <div class="form-group" style="margin-bottom:8px">
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
