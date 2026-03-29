@@ -55,15 +55,15 @@ export default async function handler(req, res) {
     // 金額合一行
     const amountLine = [order.amount ? '訂單 $'+order.amount : '', order.deliveryFee ? '外送費 $'+order.deliveryFee : ''].filter(Boolean).join('　');
     const rows = [
-      { label: '取餐',     value: shopLine },
+      { label: '訂單',     value: shopLine },
       { label: '品項',     value: order.items },
       { label: '地址',     value: order.address },
       order.distance     ? { label: '距離',   value: `約 ${order.distance} 公里` } : null,
       order.deliveryTime ? { label: '時間',   value: order.deliveryTime } : null,
       amountLine         ? { label: '費用',   value: amountLine } : null,
       order.note         ? { label: '備註',   value: order.note } : null,
-      order.orderOpts    ? { label: '特殊',   value: order.orderOpts } : null,
-      order.cashPayment==='是' ? { label: '付款', value: '💵 需收現金' } : null,
+      order.orderOpts    ? { label: '說明',   value: order.orderOpts } : null,
+      order.cashPayment==='是' ? { label: '說明', value: '💵 需收現金' } : null,
     ].filter(Boolean);
 
     const mapsUrl = `https://www.google.com/maps/dir/${ORIGIN_ADDRESS}/${encodeURIComponent(order.address)}`;
@@ -135,14 +135,14 @@ export default async function handler(req, res) {
     const shopLine2 = [order.shop, order.customer, order.pickupNumber ? '#'+order.pickupNumber : ''].filter(Boolean).join('  ');
     const amountLine2 = [order.amount ? '訂單 $'+order.amount : '', order.deliveryFee ? '外送費 $'+order.deliveryFee : ''].filter(Boolean).join('　');
     const rows = [
-      { label: '取餐',   value: shopLine2 },
+      { label: '訂單',   value: shopLine2 },
       { label: '品項',   value: order.items },
       { label: '地址',   value: order.address },
       order.distance     ? { label: '距離', value: `約 ${order.distance} 公里` } : null,
       order.deliveryTime ? { label: '時間', value: order.deliveryTime } : null,
       amountLine2        ? { label: '費用', value: amountLine2 } : null,
       order.orderOpts    ? { label: '特殊', value: order.orderOpts } : null,
-      order.cashPayment==='是' ? { label: '付款', value: '💵 需收現金' } : null,
+      order.cashPayment==='是' ? { label: '說明', value: '💵 需收現金' } : null,
     ].filter(Boolean);
 
     return {
@@ -260,7 +260,8 @@ export default async function handler(req, res) {
                     contents: [
                       ...buildAcceptedFlex(order, driverName).contents.body.contents,
                       { type: 'separator', margin: 'md' },
-                      { type: 'text', text: `${driverName}，請回覆預計到商場取餐的時間 🕐`, color: '#888888', size: 'sm', wrap: true, margin: 'md' },
+                      { type: 'text', text: `${driverName}，請回覆預計到商場取餐的時間`, color: '#1a1a18', size: 'md', weight: 'bold', wrap: true, margin: 'md' },
+                      { type: 'text', text: '例：A1，11:40取', color: '#555555', size: 'sm', wrap: true, margin: 'xs' },
                     ],
                   },
                   footer: {
