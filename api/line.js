@@ -50,20 +50,27 @@ export default async function handler(req, res) {
 
   // 派單卡片（待接單狀態）
   function buildPendingFlex(order) {
-    // 店家＋顧客＋取餐號碼合一行
-    const shopLine = [order.shop, order.customer, order.pickupNumber ? '#'+order.pickupNumber : ''].filter(Boolean).join('  ');
-    // 金額合一行
+    // 1. 訂單欄：店家 + 取餐號（不含顧客）
+    const orderLine = [order.shop, order.pickupNumber ? '#'+order.pickupNumber : ''].filter(Boolean).join(' ');
+    // 2. 送達時間加「送達」二字
+    const timeLine = order.deliveryTime ? order.deliveryTime + ' 送達' : null;
+    // 3. 說明欄：現金＋特殊需求合一行，用 ／ 隔開
+    const explainParts = [];
+    if (order.cashPayment === '是') explainParts.push('需收現金');
+    if (order.orderOpts) explainParts.push(order.orderOpts);
+    const explainLine = explainParts.join(' ／ ');
+    // 4. 金額合一行
     const amountLine = [order.amount ? '訂單 $'+order.amount : '', order.deliveryFee ? '外送費 $'+order.deliveryFee : ''].filter(Boolean).join('　');
     const rows = [
-      { label: '訂單',     value: shopLine },
-      { label: '品項',     value: order.items },
+      { label: '訂單',     value: orderLine },
+      timeLine           ? { label: '時間',   value: timeLine } : null,
+      order.customer     ? { label: '顧客',   value: order.customer } : null,
       { label: '地址',     value: order.address },
       order.distance     ? { label: '距離',   value: `約 ${order.distance} 公里` } : null,
-      order.deliveryTime ? { label: '時間',   value: order.deliveryTime } : null,
+      { label: '品項',     value: order.items },
       amountLine         ? { label: '費用',   value: amountLine } : null,
       order.note         ? { label: '備註',   value: order.note } : null,
-      order.orderOpts    ? { label: '說明',   value: order.orderOpts } : null,
-      order.cashPayment==='是' ? { label: '說明', value: '💵 需收現金' } : null,
+      explainLine        ? { label: '說明',   value: explainLine } : null,
     ].filter(Boolean);
 
     const mapsUrl = `https://www.google.com/maps/dir/${ORIGIN_ADDRESS}/${encodeURIComponent(order.address)}`;
@@ -132,17 +139,23 @@ export default async function handler(req, res) {
 
   // 已接單卡片（顯示接單人，無按鈕）
   function buildAcceptedFlex(order, driverName) {
-    const shopLine2 = [order.shop, order.customer, order.pickupNumber ? '#'+order.pickupNumber : ''].filter(Boolean).join('  ');
-    const amountLine2 = [order.amount ? '訂單 $'+order.amount : '', order.deliveryFee ? '外送費 $'+order.deliveryFee : ''].filter(Boolean).join('　');
+    const orderLine2   = [order.shop, order.pickupNumber ? '#'+order.pickupNumber : ''].filter(Boolean).join(' ');
+    const timeLineA    = order.deliveryTime ? order.deliveryTime + ' 送達' : null;
+    const ep2 = [];
+    if (order.cashPayment === '是') ep2.push('需收現金');
+    if (order.orderOpts) ep2.push(order.orderOpts);
+    const explainLine2 = ep2.join(' ／ ');
+    const amountLine2  = [order.amount ? '訂單 $'+order.amount : '', order.deliveryFee ? '外送費 $'+order.deliveryFee : ''].filter(Boolean).join('　');
     const rows = [
-      { label: '訂單',   value: shopLine2 },
-      { label: '品項',   value: order.items },
+      { label: '訂單',   value: orderLine2 },
+      timeLineA          ? { label: '時間', value: timeLineA } : null,
+      order.customer     ? { label: '顧客', value: order.customer } : null,
       { label: '地址',   value: order.address },
       order.distance     ? { label: '距離', value: `約 ${order.distance} 公里` } : null,
-      order.deliveryTime ? { label: '時間', value: order.deliveryTime } : null,
+      { label: '品項',   value: order.items },
       amountLine2        ? { label: '費用', value: amountLine2 } : null,
-      order.orderOpts    ? { label: '特殊', value: order.orderOpts } : null,
-      order.cashPayment==='是' ? { label: '說明', value: '💵 需收現金' } : null,
+      order.note         ? { label: '備註', value: order.note } : null,
+      explainLine2       ? { label: '說明', value: explainLine2 } : null,
     ].filter(Boolean);
 
     return {
