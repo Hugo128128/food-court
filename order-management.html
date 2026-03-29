@@ -99,6 +99,9 @@
       // 地圖連結：起點用地址文字，終點用座標，導航更準確
       mapEl.href = `https://www.google.com/maps/dir/${encodeURIComponent(ORIGIN_ADDRESS)}/${coord.lat},${coord.lng}`;
       mapEl.style.display = 'inline';
+      // 自動帶入外送費（若欄位為空才填）
+      const feeEl = document.getElementById('f-delivery-fee');
+      if (feeEl && !feeEl.value) feeEl.value = calcDeliveryFee(km);
     } else {
       distEl.textContent = '⚠️ 找不到此地址，請確認後重試';
     }
