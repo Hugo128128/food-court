@@ -249,6 +249,13 @@ ${text}`
     const pickupNumber = document.getElementById('f-pickup-number').value.trim();
     const customer     = document.getElementById('f-customer').value.trim();
     const cashPayment  = document.getElementById('f-cash').checked ? '是' : '否';
+    const staff        = document.getElementById('f-staff').value.trim();
+    const opts = [];
+    if (document.getElementById('f-opt1').checked) opts.push('中午前送達即可');
+    if (document.getElementById('f-opt2').checked) opts.push('做好直接送');
+    if (document.getElementById('f-opt3').checked) opts.push('建議汽車接單');
+    if (document.getElementById('f-opt4').checked) opts.push('指定時間，不能提早或遲到');
+    const orderOpts = opts.join('、');
 
     if (!shop || !items || !address) { alert('請填寫店家、品項、送達地址'); return; }
 
@@ -257,7 +264,7 @@ ${text}`
 
     try {
       const docRef = await addDoc(collection(db, 'orders'), {
-        shop, items, address, note, deliveryTime, deliveryFee, amount, distance, pickupNumber, customer, cashPayment,
+        shop, items, address, note, deliveryTime, deliveryFee, amount, distance, pickupNumber, customer, cashPayment, staff, orderOpts,
         status: 'pending', driver: '', createdAt: serverTimestamp(),
       });
 
@@ -269,12 +276,13 @@ ${text}`
           order: {
             id: docRef.id,
             shortId: docRef.id.slice(-6).toUpperCase(),
-            shop, items, address, note, deliveryTime, deliveryFee, amount, distance, pickupNumber, customer, cashPayment, cashPayment,
+            shop, items, address, note, deliveryTime, deliveryFee, amount, distance, pickupNumber, customer, cashPayment, orderOpts,
           }
         }),
       });
 
-      ['f-shop','f-items','f-address','f-note','f-delivery-fee','f-amount','f-pickup-number','f-customer'].forEach(id => document.getElementById(id).value='');
+      ['f-shop','f-items','f-address','f-note','f-delivery-fee','f-amount','f-pickup-number','f-customer','f-staff'].forEach(id => document.getElementById(id).value='');
+      ['f-opt1','f-opt2','f-opt3','f-opt4'].forEach(id => document.getElementById(id).checked=false);
       document.getElementById('f-cash').checked = false;
       document.getElementById('f-delivery-time').value = '';
       document.getElementById('distance-result').textContent = '';
@@ -336,48 +344,95 @@ ${text}`
 
   window.exportExcel = () => {
     if (!allOrders.length) { alert('目前沒有訂單資料'); return; }
+    // 初始化自訂日期預設值（今天）
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('export-date-from').value = today;
+    document.getElementById('export-date-to').value   = today;
+    document.getElementById('export-backdrop').classList.add('open');
+  };
 
-    const headers = ['訂單編號','建立時間','店家','取餐號碼','顧客','品項','送達地址','距離(km)','送達時間','訂單金額','外送費','備註','狀態','外送員','完成時間'];
+  window.closeExport = () => document.getElementById('export-backdrop').classList.remove('open');
+
+  window.doExport = () => {
+    const period = document.getElementById('export-period').value;
+    const now    = new Date();
+    let from, to, label;
+
+    if (period === 'custom') {
+      const f = document.getElementById('export-date-from').value;
+      const t = document.getElementById('export-date-to').value;
+      if (!f || !t) { alert('請選擇起迄日期'); return; }
+      from  = new Date(f + 'T00:00:00');
+      to    = new Date(t + 'T23:59:59');
+      label = `${f}_${t}`;
+    } else {
+      to = new Date(now); to.setHours(23,59,59,999);
+      if (period === 'today') {
+        from = new Date(now); from.setHours(0,0,0,0);
+        label = now.toLocaleDateString('zh-TW').replace(/\//g,'-');
+      } else if (period === 'yesterday') {
+        from = new Date(now); from.setDate(from.getDate()-1); from.setHours(0,0,0,0);
+        to   = new Date(from); to.setHours(23,59,59,999);
+        label = from.toLocaleDateString('zh-TW').replace(/\//g,'-');
+      } else if (period === 'week') {
+        from = new Date(now); from.setDate(from.getDate()-6); from.setHours(0,0,0,0);
+        label = '近7天';
+      } else if (period === 'month') {
+        from = new Date(now.getFullYear(), now.getMonth(), 1);
+        label = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+      } else if (period === 'lastmonth') {
+        const lm = new Date(now.getFullYear(), now.getMonth()-1, 1);
+        from  = lm;
+        to    = new Date(now.getFullYear(), now.getMonth(), 0); to.setHours(23,59,59,999);
+        label = `${lm.getFullYear()}-${String(lm.getMonth()+1).padStart(2,'0')}`;
+      } else {
+        from = new Date(0); label = '全部';
+      }
+    }
 
     const statusLabel = { pending:'待接單', accepted:'已接單', delivering:'配送中', done:'已送達', cancelled:'已取消' };
+    const headers = ['訂單編號','建立時間','店家','取餐號碼','顧客','品項','送達地址','距離(km)','送達時間','訂單金額','外送費','備註','狀態','外送員','完成時間','收現金','特殊需求','建檔人員'];
 
-    const rows = allOrders.map(o => {
-      const createdAt  = o.createdAt?.toDate  ? o.createdAt.toDate().toLocaleString('zh-TW')  : '';
-      const completedAt= o.completedAt?.toDate? o.completedAt.toDate().toLocaleString('zh-TW'): '';
+    const filtered = allOrders.filter(o => {
+      if (!o.createdAt?.toDate) return false;
+      const t = o.createdAt.toDate();
+      return t >= from && t <= to;
+    });
+
+    if (!filtered.length) { alert(`${label} 內沒有訂單資料`); return; }
+
+    const rows = filtered.map(o => {
+      const createdAt   = o.createdAt?.toDate  ? o.createdAt.toDate().toLocaleString('zh-TW')   : '';
+      const completedAt = o.completedAt?.toDate ? o.completedAt.toDate().toLocaleString('zh-TW') : '';
       return [
-        o.id.slice(-6).toUpperCase(),
-        createdAt,
-        o.shop        || '',
-        o.pickupNumber|| '',
-        o.customer    || '',
-        o.items       || '',
-        o.address     || '',
-        o.distance    || '',
-        o.deliveryTime|| '',
-        o.amount      || '',
-        o.deliveryFee || '',
-        o.note        || '',
-        statusLabel[o.status] || o.status || '',
-        o.driver      || '',
-        completedAt,
+        o.id.slice(-6).toUpperCase(), createdAt,
+        o.shop||'', o.pickupNumber||'', o.customer||'',
+        o.items||'', o.address||'', o.distance||'',
+        o.deliveryTime||'', o.amount||'', o.deliveryFee||'',
+        o.note||'', statusLabel[o.status]||o.status||'',
+        o.driver||'', completedAt,
+        o.cashPayment||'', o.orderOpts||'', o.staff||'',
       ];
     });
 
-    // 產生 CSV（加 BOM 讓 Excel 正確顯示中文）
     const BOM = '\uFEFF';
     const csvContent = BOM + [headers, ...rows]
-      .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+      .map(row => row.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(','))
       .join('\n');
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
-    const date = new Date().toLocaleDateString('zh-TW').replace(/\//g, '-');
-    a.href     = url;
-    a.download = `Mula_Kitchens_訂單明細_${date}.csv`;
+    a.href = url;
+    a.download = `Mula_Kitchens_訂單明細_${label}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    showToast('Excel 匯出成功！');
+    closeExport();
+    showToast(`已匯出 ${filtered.length} 筆訂單`);
+  };
+
+  window.toggleCustomDate = (val) => {
+    document.getElementById('custom-date-row').style.display = val === 'custom' ? 'block' : 'none';
   };
 
   function showToast(msg) {
@@ -424,6 +479,7 @@ ${text}`
         o.amount       ? `<span class="tag tag-green">💰 $${o.amount}</span>` : '',
         o.deliveryFee  ? `<span class="tag tag-gray">外送費 $${o.deliveryFee}</span>` : '',
         o.cashPayment==='是' ? `<span class="tag tag-cash">需收現金</span>` : '',
+        o.orderOpts ? o.orderOpts.split('、').map(t => `<span class="tag tag-opt">${t}</span>`).join('') : '',
       ].filter(Boolean).join('');
 
       return `<div class="order-card">
@@ -496,6 +552,7 @@ ${text}`
   .tag-green{background:var(--green-light);color:#065f46}
   .tag-gray{background:var(--gray-light);color:var(--text-2)}
   .tag-cash{background:#fef3c7;color:#92400e;font-weight:700}
+  .tag-opt{background:#ede9fe;color:#5b21b6}
   .tag-purple{background:#ede9fe;color:#5b21b6}
   .status-badge{font-size:11px;font-weight:500;padding:4px 11px;border-radius:20px;white-space:nowrap;flex-shrink:0}
   .badge-pending{font-size:16px!important;padding:8px 16px!important;font-weight:700!important}
@@ -606,17 +663,23 @@ ${text}`
         <input class="form-input" id="f-pickup-number" type="text" placeholder="例：A012、38號" oninput="updateOrderTitle()">
       </div>
     </div>
-    <div class="form-group">
-      <label class="form-label">顧客姓名／公司名稱</label>
-      <input class="form-input" id="f-customer" type="text" placeholder="例：王小明、台積電">
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">顧客姓名／公司名稱</label>
+        <input class="form-input" id="f-customer" type="text" placeholder="例：王小明、台積電">
+      </div>
+      <div class="form-group">
+        <label class="form-label">建檔人員（選填）</label>
+        <input class="form-input" id="f-staff" type="text" placeholder="例：小美">
+      </div>
     </div>
     <div class="form-group">
       <label class="form-label">品項內容 <span class="req">*</span></label>
-      <textarea class="form-textarea" id="f-items" placeholder="例：蝦餃x2、燒賣x3、腸粉x1&#10;可換行輸入多項"></textarea>
+      <textarea class="form-textarea" id="f-items" placeholder="例：餐盒x2、飲料x5、炸物x5&#10;可換行輸入多項"></textarea>
     </div>
     <div class="form-group">
       <label class="form-label">送達地址 <span class="req">*</span></label>
-      <input class="form-input" id="f-address" type="text" placeholder="例：西屯區文心路100號" oninput="onAddressInput()">
+      <input class="form-input" id="f-address" type="text" placeholder="例：西屯區國安一路128號" oninput="onAddressInput()">
       <div class="distance-row">
         <span class="distance-text" id="distance-result"></span>
         <a class="map-link" id="map-link" href="#" target="_blank">查看地圖 →</a>
@@ -643,10 +706,28 @@ ${text}`
       </div>
     </div>
     <div class="form-group" style="margin-bottom:8px">
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px;color:var(--text)">
-        <input type="checkbox" id="f-cash" style="width:18px;height:18px;accent-color:var(--green);cursor:pointer">
-        <span>💵 需收現金</span>
-      </label>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text);white-space:nowrap">
+          <input type="checkbox" id="f-cash" style="width:16px;height:16px;accent-color:var(--green);cursor:pointer">
+          <span>💵 需收現金</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text);white-space:nowrap">
+          <input type="checkbox" id="f-opt1" style="width:16px;height:16px;accent-color:var(--green);cursor:pointer">
+          <span>中午前送達即可</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text);white-space:nowrap">
+          <input type="checkbox" id="f-opt2" style="width:16px;height:16px;accent-color:var(--green);cursor:pointer">
+          <span>做好直接送</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text);white-space:nowrap">
+          <input type="checkbox" id="f-opt3" style="width:16px;height:16px;accent-color:var(--green);cursor:pointer">
+          <span>建議汽車接單</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text);white-space:nowrap">
+          <input type="checkbox" id="f-opt4" style="width:16px;height:16px;accent-color:var(--green);cursor:pointer">
+          <span>指定時間，不能提早或遲到</span>
+        </label>
+      </div>
     </div>
     <div class="form-actions">
       <button class="btn-cancel" onclick="closeModal()">取消</button>
@@ -656,6 +737,44 @@ ${text}`
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- 匯出時間範圍 Modal -->
+<div class="modal-backdrop" id="export-backdrop" onclick="if(event.target===this)closeExport()">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-header">
+      <h2>匯出訂單明細</h2>
+      <button class="modal-close" onclick="closeExport()">✕</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">選擇時間範圍</label>
+      <select class="form-select" id="export-period" onchange="toggleCustomDate(this.value)">
+        <option value="today">今天</option>
+        <option value="yesterday">昨天</option>
+        <option value="week">近 7 天</option>
+        <option value="month">本月</option>
+        <option value="lastmonth">上個月</option>
+        <option value="all">全部資料</option>
+        <option value="custom">自訂日期範圍</option>
+      </select>
+    </div>
+    <div id="custom-date-row" style="display:none">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">開始日期</label>
+          <input class="form-input" id="export-date-from" type="date">
+        </div>
+        <div class="form-group">
+          <label class="form-label">結束日期</label>
+          <input class="form-input" id="export-date-to" type="date">
+        </div>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn-cancel" onclick="closeExport()">取消</button>
+      <button class="btn-submit" onclick="doExport()">⬇ 下載 Excel</button>
+    </div>
+  </div>
+</div>
 
 <!-- 匯入訂單 Modal -->
 <div class="modal-backdrop" id="import-backdrop" onclick="if(event.target===this)closeImport()">
