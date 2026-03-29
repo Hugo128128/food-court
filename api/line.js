@@ -1,490 +1,335 @@
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mula Kitchens 外送看板</title>
+export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-  import { getFirestore, collection, onSnapshot, doc, updateDoc, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST') return res.status(405).end();
 
-  const firebaseConfig = {
-    apiKey: "AIzaSyDMZ_9LER29KpuL7d0NsSjbxKWeR_c_aCQ",
-    authDomain: "food-court-orders.firebaseapp.com",
-    projectId: "food-court-orders",
-    storageBucket: "food-court-orders.firebasestorage.app",
-    messagingSenderId: "348196844429",
-    appId: "1:348196844429:web:95a01423c510d499f7c3c4"
-  };
+  const ACCESS_TOKEN = 'lf2LNqitEO8q2YFSMTdf04Z+0dVmRedSW6Kk+I32M2Oevh8peZ2PS++vcHqzXzSvl66Zjg4Oy6wF6KLIpcFtZbSdIUzysZiMTk3Gyf2pXZ7P2gooeLzJWNyUQIEN2AauG4JvMid7RfN73YJNWqzSvgdB04t89/1O/w1cDnyilFU=';
+  const GROUP_ID     = 'Cccff0e697e44e824874162bffd332fc2';
+  const FIREBASE_URL = 'https://firestore.googleapis.com/v1/projects/food-court-orders/databases/(default)/documents/orders';
+  const FIREBASE_API_KEY = 'AIzaSyDMZ_9LER29KpuL7d0NsSjbxKWeR_c_aCQ';
+  const ORIGIN_ADDRESS = encodeURIComponent('臺中市西屯區國安一路128號');
 
-  const app = initializeApp(firebaseConfig);
-  const db = getFirestore(app);
-
-  let driverName = localStorage.getItem('driverName') || '';
-  let allOrders = [];
-
-  // 如果已有名字就直接進入，否則顯示輸入畫面
-  if (driverName) {
-    showBoard();
-  } else {
-    document.getElementById('login-screen').style.display = 'flex';
-  }
-
-  window.enterBoard = () => {
-    const name = document.getElementById('driver-name-input').value.trim();
-    if (!name) { alert('請輸入你的姓名'); return; }
-    driverName = name;
-    localStorage.setItem('driverName', name);
-    showBoard();
-  };
-
-  window.changeName = () => {
-    localStorage.removeItem('driverName');
-    location.reload();
-  };
-
-  function showBoard() {
-    document.getElementById('login-screen').style.display = 'none';
-    document.getElementById('board').style.display = 'block';
-    document.getElementById('driver-label').textContent = driverName;
-    startListening();
-  }
-
-  function startListening() {
-    const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
-    onSnapshot(q, (snapshot) => {
-      allOrders = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      renderBoard();
+  async function sendToGroup(messages) {
+    await fetch('https://api.line.me/v2/bot/message/push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + ACCESS_TOKEN },
+      body: JSON.stringify({ to: GROUP_ID, messages }),
     });
   }
 
-  window.acceptOrder = async (id) => {
-    const btn = document.getElementById('btn-' + id);
-    if (btn) { btn.disabled = true; btn.textContent = '處理中...'; }
+  async function getDisplayName(groupId, userId) {
     try {
-      await updateDoc(doc(db, 'orders', id), {
-        status: 'accepted',
-        driver: driverName,
+      const r = await fetch(`https://api.line.me/v2/bot/group/${groupId}/member/${userId}`, {
+        headers: { 'Authorization': 'Bearer ' + ACCESS_TOKEN }
       });
-    } catch(e) {
-      alert('接單失敗，請重試');
-      if (btn) { btn.disabled = false; btn.textContent = '接單'; }
+      const d = await r.json();
+      return d.displayName || '外送員';
+    } catch(e) { return '外送員'; }
+  }
+
+  async function getOrder(orderId) {
+    const r = await fetch(`${FIREBASE_URL}/${orderId}?key=${FIREBASE_API_KEY}`);
+    return await r.json();
+  }
+
+  async function updateOrder(orderId, fields) {
+    const body = { fields: {} };
+    for (const [k, v] of Object.entries(fields)) {
+      body.fields[k] = { stringValue: v };
     }
-  };
-
-  window.markDelivering = async (id) => {
-    await updateDoc(doc(db, 'orders', id), { status: 'delivering' });
-  };
-
-  window.markDone = async (id) => {
-    await updateDoc(doc(db, 'orders', id), {
-      status: 'done',
-      completedAt: serverTimestamp(),
+    const updateMask = Object.keys(fields).map(k => `updateMask.fieldPaths=${k}`).join('&');
+    await fetch(`${FIREBASE_URL}/${orderId}?key=${FIREBASE_API_KEY}&${updateMask}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     });
-  };
+  }
 
-  function renderBoard() {
-    const pending    = allOrders.filter(o => o.status === 'pending');
-    const myOrders   = allOrders.filter(o => (o.status === 'accepted' || o.status === 'delivering') && o.driver === driverName);
-    const otherActive= allOrders.filter(o => (o.status === 'accepted' || o.status === 'delivering') && o.driver !== driverName);
+  // 派單卡片（待接單狀態）
+  function buildPendingFlex(order) {
+    const rows = [
+      { label: '店家',     value: order.shop },
+      order.customer     ? { label: '顧客',     value: order.customer } : null,
+      order.pickupNumber ? { label: '取餐號碼', value: order.pickupNumber } : null,
+      { label: '品項',     value: order.items },
+      { label: '地址',     value: order.address },
+      order.distance     ? { label: '距離',     value: `約 ${order.distance} 公里` } : null,
+      order.deliveryTime ? { label: '送達時間', value: order.deliveryTime } : null,
+      order.amount       ? { label: '訂單金額', value: `$${order.amount}` } : null,
+      order.deliveryFee  ? { label: '外送費',   value: `$${order.deliveryFee}` } : null,
+      order.note         ? { label: '備註',     value: order.note } : null,
+    ].filter(Boolean);
 
-    // 統計數字
-    document.getElementById('cnt-pending').textContent = pending.length;
-    document.getElementById('cnt-mine').textContent    = myOrders.length;
-    document.getElementById('cnt-done').textContent    = allOrders.filter(o => o.status === 'done').length;
+    const mapsUrl = `https://www.google.com/maps/dir/${ORIGIN_ADDRESS}/${encodeURIComponent(order.address)}`;
 
-    // 待接單
-    const pendingEl = document.getElementById('pending-list');
-    if (pending.length === 0) {
-      pendingEl.innerHTML = '<div class="empty-state">目前沒有待接的訂單</div>';
-    } else {
-      pendingEl.innerHTML = pending.map(o => `
-        <div class="order-card pending-card" id="card-${o.id}">
-          <div class="card-top">
-            <div class="card-info">
-              <div class="card-shop">${o.shop}${o.pickupNumber ? ' <span class="card-pickup">' + o.pickupNumber + '</span>' : ''}${o.customer ? ' · ' + o.customer : ''}</div>
-              <div class="card-addr">${o.address}</div>
-              <div class="card-items">${o.items}</div>
-              <div class="card-tags">
-                ${o.distance ? '<span class="ctag ctag-blue">📍 ' + o.distance + ' 公里</span>' : ''}
-                ${o.amount ? '<span class="ctag ctag-green">💰 $' + o.amount + '</span>' : ''}
-                ${o.deliveryFee ? '<span class="ctag ctag-gray">外送費 $' + o.deliveryFee + '</span>' : ''}
-                ${o.note ? '<span class="ctag ctag-gray">備註：' + o.note + '</span>' : ''}
-              </div>
-            </div>
-            <div class="card-time">
-                <div class="time-row"><span class="time-label">建立</span>${formatTime(o.createdAt)}</div>
-                ${o.deliveryTime ? '<div class="time-row time-deadline"><span class="time-label">送達</span>' + o.deliveryTime + '</div>' : ''}
-              </div>
-          </div>
-          <div class="card-action">
-            <button class="btn-accept" id="btn-${o.id}" onclick="acceptOrder('${o.id}')">接單</button>
-          </div>
-        </div>
-      `).join('');
+    return {
+      type: 'flex',
+      altText: `🛵 新訂單 ${order.shop}${order.pickupNumber ? ' #' + order.pickupNumber : ''} — Mula Kitchens`,
+      contents: {
+        type: 'bubble',
+        header: {
+          type: 'box',
+          layout: 'vertical',
+          backgroundColor: '#06C755',
+          paddingAll: '16px',
+          contents: [
+            { type: 'text', text: `🛵 ${order.shop}${order.pickupNumber ? ' #' + order.pickupNumber : ''}`, color: '#ffffff', weight: 'bold', size: 'lg', wrap: true },
+            { type: 'text', text: 'Mula Kitchens 外送派單系統', color: '#ccffdd', size: 'xs', margin: 'xs' },
+          ],
+        },
+        body: {
+          type: 'box',
+          layout: 'vertical',
+          spacing: 'md',
+          paddingAll: '16px',
+          contents: rows.map(r => ({
+            type: 'box',
+            layout: 'horizontal',
+            contents: [
+              { type: 'text', text: r.label, color: '#888888', size: 'sm', flex: 3, gravity: 'top' },
+              { type: 'text', text: r.value, color: '#1a1a18', size: 'sm', flex: 7, wrap: true, weight: 'bold' },
+            ],
+          })),
+        },
+        footer: {
+          type: 'box',
+          layout: 'horizontal',
+          spacing: 'sm',
+          paddingAll: '12px',
+          contents: [
+            {
+              type: 'button',
+              style: 'primary',
+              color: '#06C755',
+              height: 'sm',
+              action: {
+                type: 'postback',
+                label: '✋ 接單',
+                data: `action=accept&orderId=${order.id}`,
+              },
+            },
+            {
+              type: 'button',
+              style: 'secondary',
+              height: 'sm',
+              action: {
+                type: 'uri',
+                label: '📍 查看地圖',
+                uri: mapsUrl,
+              },
+            },
+          ],
+        },
+      },
+    };
+  }
+
+  // 已接單卡片（顯示接單人，無按鈕）
+  function buildAcceptedFlex(order, driverName) {
+    const rows = [
+      { label: '店家',     value: order.shop },
+      order.customer     ? { label: '顧客',     value: order.customer } : null,
+      order.pickupNumber ? { label: '取餐號碼', value: order.pickupNumber } : null,
+      { label: '品項',     value: order.items },
+      { label: '地址',     value: order.address },
+      order.distance     ? { label: '距離',     value: `約 ${order.distance} 公里` } : null,
+      order.deliveryTime ? { label: '送達時間', value: order.deliveryTime } : null,
+      order.amount       ? { label: '訂單金額', value: `$${order.amount}` } : null,
+      order.deliveryFee  ? { label: '外送費',   value: `$${order.deliveryFee}` } : null,
+    ].filter(Boolean);
+
+    return {
+      type: 'flex',
+      altText: `✅ ${driverName} 已接單 — ${order.shop}${order.pickupNumber ? ' #' + order.pickupNumber : ''}`,
+      contents: {
+        type: 'bubble',
+        header: {
+          type: 'box',
+          layout: 'vertical',
+          backgroundColor: '#333333',
+          paddingAll: '16px',
+          contents: [
+            { type: 'text', text: `✅ 已由 ${driverName} 接單`, color: '#ffffff', weight: 'bold', size: 'md', wrap: true },
+            { type: 'text', text: `${order.shop}${order.pickupNumber ? ' #' + order.pickupNumber : ''} — 請勿重複接單`, color: '#aaaaaa', size: 'xs', margin: 'xs', wrap: true },
+          ],
+        },
+        body: {
+          type: 'box',
+          layout: 'vertical',
+          spacing: 'md',
+          paddingAll: '16px',
+          contents: rows.map(r => ({
+            type: 'box',
+            layout: 'horizontal',
+            contents: [
+              { type: 'text', text: r.label, color: '#888888', size: 'sm', flex: 3, gravity: 'top' },
+              { type: 'text', text: r.value, color: '#1a1a18', size: 'sm', flex: 7, wrap: true },
+            ],
+          })),
+        },
+      },
+    };
+  }
+
+  // 棄單後重新派單卡片
+  function buildReopenFlex(order, prevDriver) {
+    const flex = buildPendingFlex(order);
+    flex.contents.header.contents[0].text = `🔄 重新派單 — ${order.shop}${order.pickupNumber ? ' #' + order.pickupNumber : ''}`;
+    flex.altText = `🔄 重新派單 — ${order.shop}`;
+    flex.contents.header.backgroundColor = '#d97706';
+    flex.contents.header.contents.push({
+      type: 'text',
+      text: `${prevDriver} 已棄單，重新開放接單`,
+      color: '#fef3c7',
+      size: 'xs',
+      margin: 'xs',
+    });
+    return flex;
+  }
+
+  const body = req.body;
+
+  // ── LINE Webhook 事件 ──
+  if (body?.events) {
+    for (const event of body.events) {
+      if (event.source?.type === 'group') {
+        console.log('群組 ID：', event.source.groupId);
+      }
+
+      if (event.type === 'postback') {
+        const params  = new URLSearchParams(event.postback.data);
+        const action  = params.get('action');
+        const orderId = params.get('orderId');
+
+        // 外送員按「接單」
+        if (action === 'accept' && orderId) {
+          const driverName = await getDisplayName(event.source.groupId, event.source.userId);
+          try {
+            const docSnap = await getOrder(orderId);
+            const currentStatus = docSnap.fields?.status?.stringValue;
+            const shop         = docSnap.fields?.shop?.stringValue || '';
+            const pickupNumber = docSnap.fields?.pickupNumber?.stringValue || '';
+            const shortId      = orderId.slice(-6).toUpperCase();
+
+            if (currentStatus === 'pending') {
+              await updateOrder(orderId, { status: 'accepted', driver: driverName });
+
+              // 重新取得完整訂單資料
+              const fullDoc = await getOrder(orderId);
+              const order = {
+                id: orderId, shortId,
+                shop,        pickupNumber,
+                customer:     fullDoc.fields?.customer?.stringValue || '',
+                items:        fullDoc.fields?.items?.stringValue || '',
+                address:      fullDoc.fields?.address?.stringValue || '',
+                distance:     fullDoc.fields?.distance?.stringValue || '',
+                deliveryTime: fullDoc.fields?.deliveryTime?.stringValue || '',
+                amount:       fullDoc.fields?.amount?.stringValue || '',
+                deliveryFee:  fullDoc.fields?.deliveryFee?.stringValue || '',
+                note:         fullDoc.fields?.note?.stringValue || '',
+              };
+
+              // 發送已接單卡片（灰色，顯示接單人，無接單按鈕）+ 棄單按鈕
+              await sendToGroup([
+                buildAcceptedFlex(order, driverName),
+                {
+                  type: 'flex',
+                  altText: `${driverName} 如需棄單請點此`,
+                  contents: {
+                    type: 'bubble',
+                    body: {
+                      type: 'box',
+                      layout: 'horizontal',
+                      paddingAll: '12px',
+                      contents: [
+                        { type: 'text', text: `${driverName}，如需棄單：`, color: '#888888', size: 'sm', flex: 5, gravity: 'center' },
+                        {
+                          type: 'button',
+                          style: 'secondary',
+                          height: 'sm',
+                          flex: 3,
+                          action: {
+                            type: 'postback',
+                            label: '棄單',
+                            data: `action=drop&orderId=${orderId}&driverName=${encodeURIComponent(driverName)}`,
+                          },
+                        },
+                      ],
+                    },
+                  },
+                },
+              ]);
+            } else {
+              // 已被別人接了
+              const takenBy = docSnap.fields?.driver?.stringValue || '其他外送員';
+              await sendToGroup([{
+                type: 'text',
+                text: `⚠️ 此訂單已由 ${takenBy} 接單，${driverName} 請接下一張。`,
+              }]);
+            }
+          } catch(e) {
+            console.error('處理接單失敗：', e.message);
+          }
+        }
+
+        // 外送員按「棄單」
+        if (action === 'drop' && orderId) {
+          const driverName = decodeURIComponent(params.get('driverName') || '外送員');
+          try {
+            const docSnap = await getOrder(orderId);
+            const currentStatus = docSnap.fields?.status?.stringValue;
+
+            if (currentStatus === 'accepted') {
+              await updateOrder(orderId, { status: 'pending', driver: '' });
+
+              const order = {
+                id: orderId,
+                shortId: orderId.slice(-6).toUpperCase(),
+                shop:         docSnap.fields?.shop?.stringValue || '',
+                pickupNumber: docSnap.fields?.pickupNumber?.stringValue || '',
+                customer:     docSnap.fields?.customer?.stringValue || '',
+                items:        docSnap.fields?.items?.stringValue || '',
+                address:      docSnap.fields?.address?.stringValue || '',
+                distance:     docSnap.fields?.distance?.stringValue || '',
+                deliveryTime: docSnap.fields?.deliveryTime?.stringValue || '',
+                amount:       docSnap.fields?.amount?.stringValue || '',
+                deliveryFee:  docSnap.fields?.deliveryFee?.stringValue || '',
+                note:         docSnap.fields?.note?.stringValue || '',
+              };
+
+              await sendToGroup([buildReopenFlex(order, driverName)]);
+            }
+          } catch(e) {
+            console.error('處理棄單失敗：', e.message);
+          }
+        }
+      }
     }
+    return res.status(200).json({ status: 'ok' });
+  }
 
-    // 我的訂單
-    const mineEl = document.getElementById('mine-list');
-    if (myOrders.length === 0) {
-      mineEl.innerHTML = '<div class="empty-state">你目前沒有進行中的訂單</div>';
-    } else {
-      mineEl.innerHTML = myOrders.map(o => {
-        const isDelivering = o.status === 'delivering';
-        return `
-          <div class="order-card mine-card">
-            <div class="card-top">
-              <div class="card-info">
-                <div class="card-shop">${o.shop}${o.pickupNumber ? ' <span class="card-pickup">' + o.pickupNumber + '</span>' : ''}${o.customer ? ' · ' + o.customer : ''}</div>
-                <div class="card-addr">${o.address}</div>
-                <div class="card-items">${o.items}</div>
-                <div class="card-tags">
-                  ${o.distance ? '<span class="ctag ctag-blue">📍 ' + o.distance + ' 公里</span>' : ''}
-                    ${o.amount ? '<span class="ctag ctag-green">💰 $' + o.amount + '</span>' : ''}
-                  ${o.deliveryFee ? '<span class="ctag ctag-gray">外送費 $' + o.deliveryFee + '</span>' : ''}
-                  ${o.note ? '<span class="ctag ctag-gray">備註：' + o.note + '</span>' : ''}
-                </div>
-              </div>
-              <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0">
-                <span class="status-pill ${isDelivering ? 'pill-delivering' : 'pill-accepted'}">
-                  ${isDelivering ? '配送中' : '已接單'}
-                </span>
-                ${o.deliveryTime ? `<div class="time-deadline-big">送達<br>${o.deliveryTime}</div>` : ''}
-              </div>
-            </div>
-            <div class="card-action">
-              ${!isDelivering
-                ? `<button class="btn-secondary" onclick="markDelivering('${o.id}')">出發取餐</button>`
-                : `<button class="btn-done" onclick="markDone('${o.id}')">已送達</button>`
-              }
-            </div>
-          </div>
-        `;
-      }).join('');
-    }
-
-    // 其他外送員的訂單
-    const otherEl = document.getElementById('other-list');
-    if (otherActive.length === 0) {
-      otherEl.innerHTML = '<div class="empty-state">無</div>';
-    } else {
-      otherEl.innerHTML = otherActive.map(o => `
-        <div class="order-card other-card">
-          <div class="card-top">
-            <div class="card-info">
-              <div class="card-shop">${o.shop} <span class="other-driver">— ${o.driver}</span></div>
-              <div class="card-addr">送至：${o.address}</div>
-            </div>
-            <span class="status-pill pill-other">${o.status === 'delivering' ? '配送中' : '已接單'}</span>
-          </div>
-        </div>
-      `).join('');
+  // ── 來自網頁的發單請求 ──
+  if (body?.order) {
+    try {
+      await sendToGroup([buildPendingFlex(body.order)]);
+      return res.status(200).json({ success: true });
+    } catch(e) {
+      return res.status(200).json({ error: e.message });
     }
   }
 
-  function formatTime(ts) {
-    if (!ts?.toDate) return '—';
-    return ts.toDate().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
-  }
-
-  window.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && document.getElementById('login-screen').style.display !== 'none') {
-      enterBoard();
+  // ── 舊的純文字發訊息（向下相容）──
+  if (body?.message) {
+    try {
+      await sendToGroup([{ type: 'text', text: body.message }]);
+      return res.status(200).json({ success: true });
+    } catch(e) {
+      return res.status(200).json({ error: e.message });
     }
-  });
-</script>
-
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-  :root {
-    --bg: #0f1117;
-    --surface: #1a1d27;
-    --surface-2: #222533;
-    --border: rgba(255,255,255,0.08);
-    --text: #f0f0ee;
-    --text-2: #9a9a96;
-    --text-3: #5a5a58;
-    --green: #06C755;
-    --green-dim: rgba(6,199,85,0.12);
-    --amber: #f59e0b;
-    --amber-dim: rgba(245,158,11,0.12);
-    --blue: #60a5fa;
-    --blue-dim: rgba(96,165,250,0.12);
-    --red: #f87171;
-    --radius: 12px;
-    --radius-sm: 8px;
   }
 
-  body {
-    font-family: 'Noto Sans TC', sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    min-height: 100vh;
-    font-size: 15px;
-    line-height: 1.5;
-  }
-
-  /* ── 登入畫面 ── */
-  #login-screen {
-    display: none;
-    min-height: 100vh;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
-  }
-  .login-box {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 36px 32px;
-    width: 100%;
-    max-width: 380px;
-    text-align: center;
-  }
-  .login-icon {
-    width: 56px; height: 56px; border-radius: 50%;
-    background: var(--green-dim); border: 1px solid rgba(6,199,85,0.3);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 24px; margin: 0 auto 20px;
-  }
-  .login-box h2 { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
-  .login-box p  { font-size: 14px; color: var(--text-2); margin-bottom: 24px; }
-  .login-input {
-    width: 100%; border: 1px solid var(--border); border-radius: var(--radius-sm);
-    padding: 12px 14px; font-size: 16px; font-family: inherit;
-    color: var(--text); background: var(--surface-2); outline: none;
-    transition: border-color 0.15s; margin-bottom: 12px;
-  }
-  .login-input:focus { border-color: var(--green); }
-  .login-btn {
-    width: 100%; padding: 13px; border: none; border-radius: var(--radius-sm);
-    background: var(--green); color: #fff; font-size: 16px; font-weight: 700;
-    font-family: inherit; cursor: pointer; transition: opacity 0.15s;
-  }
-  .login-btn:hover { opacity: 0.88; }
-
-  /* ── 看板 ── */
-  #board { display: none; }
-
-  .topbar {
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    padding: 14px 24px;
-    display: flex; align-items: center; justify-content: space-between;
-    position: sticky; top: 0; z-index: 10;
-  }
-  .topbar-left { display: flex; align-items: center; gap: 10px; }
-  .topbar-left h1 { font-size: 17px; font-weight: 700; }
-  .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; flex-shrink: 0; }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
-  .topbar-right { display: flex; align-items: center; gap: 10px; }
-  .driver-chip {
-    background: var(--green-dim); border: 1px solid rgba(6,199,85,0.25);
-    border-radius: 20px; padding: 5px 12px; font-size: 13px; color: var(--green);
-    display: flex; align-items: center; gap: 6px;
-  }
-  .btn-change {
-    font-size: 12px; color: var(--text-3); background: none; border: none;
-    cursor: pointer; font-family: inherit; padding: 4px 8px;
-    border-radius: 6px; transition: background 0.12s;
-  }
-  .btn-change:hover { background: var(--surface-2); color: var(--text-2); }
-
-  /* 統計 */
-  .stats-bar {
-    display: flex; gap: 12px; padding: 16px 24px;
-    border-bottom: 1px solid var(--border);
-  }
-  .stat-chip {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius-sm); padding: 10px 18px;
-    display: flex; align-items: center; gap: 10px;
-  }
-  .stat-num { font-size: 22px; font-weight: 700; }
-  .stat-label { font-size: 12px; color: var(--text-2); margin-top: 1px; }
-  .num-amber { color: var(--amber); }
-  .num-green { color: var(--green); }
-  .num-blue  { color: var(--blue); }
-
-  /* 欄位 */
-  .columns {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0;
-    min-height: calc(100vh - 130px);
-  }
-  .col {
-    padding: 20px 24px;
-    border-right: 1px solid var(--border);
-  }
-  .col:last-child { border-right: none; }
-  .col-header {
-    display: flex; align-items: center; gap: 8px;
-    margin-bottom: 16px;
-  }
-  .col-title { font-size: 14px; font-weight: 700; color: var(--text-2); letter-spacing: 0.5px; }
-  .col-count {
-    font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px;
-  }
-  .count-amber { background: var(--amber-dim); color: var(--amber); }
-  .count-green { background: var(--green-dim); color: var(--green); }
-  .count-blue  { background: var(--blue-dim);  color: var(--blue); }
-
-  /* 訂單卡片 */
-  .order-card {
-    border-radius: var(--radius); padding: 16px; margin-bottom: 12px;
-    border: 1px solid var(--border); transition: border-color 0.15s;
-  }
-  .pending-card { background: var(--surface); border-left: 3px solid var(--amber); }
-  .mine-card    { background: var(--surface); border-left: 3px solid var(--green); }
-  .other-card   { background: var(--surface-2); opacity: 0.7; }
-
-  .card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
-  .card-shop  { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
-  .card-items { font-size: 14px; color: var(--text-2); margin-bottom: 4px; }
-  .card-addr  { font-size: 13px; color: var(--text-3); }
-  .card-time  { font-size: 13px; color: var(--text-3); white-space: nowrap; flex-shrink: 0; }
-  .other-driver { font-size: 14px; font-weight: 400; color: var(--text-3); }
-
-  .card-action { display: flex; justify-content: flex-end; }
-
-  .btn-accept {
-    background: var(--green); color: #fff; border: none; border-radius: var(--radius-sm);
-    padding: 10px 28px; font-size: 15px; font-weight: 700; cursor: pointer;
-    font-family: inherit; transition: opacity 0.15s; letter-spacing: 0.5px;
-  }
-  .btn-accept:hover:not(:disabled) { opacity: 0.85; }
-  .btn-accept:disabled { opacity: 0.5; cursor: not-allowed; }
-
-  .btn-secondary {
-    background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
-    border-radius: var(--radius-sm); padding: 9px 20px; font-size: 14px; font-weight: 500;
-    cursor: pointer; font-family: inherit; transition: border-color 0.15s;
-  }
-  .btn-secondary:hover { border-color: rgba(255,255,255,0.2); }
-
-  .btn-done {
-    background: rgba(96,165,250,0.15); color: var(--blue);
-    border: 1px solid rgba(96,165,250,0.3); border-radius: var(--radius-sm);
-    padding: 9px 20px; font-size: 14px; font-weight: 700;
-    cursor: pointer; font-family: inherit; transition: background 0.15s;
-  }
-  .btn-done:hover { background: rgba(96,165,250,0.25); }
-
-  .status-pill { font-size: 12px; font-weight: 500; padding: 4px 10px; border-radius: 20px; white-space: nowrap; flex-shrink: 0; }
-  .pill-accepted   { background: var(--green-dim); color: var(--green); }
-  .pill-delivering { background: var(--blue-dim);  color: var(--blue); }
-  .pill-other      { background: var(--surface-2); color: var(--text-3); }
-
-  .empty-state { text-align: center; padding: 32px 20px; color: var(--text-3); font-size: 14px; }
-  .card-pickup { font-weight: 400; color: var(--text-2); font-size: 15px; }
-  .time-row { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-3); white-space: nowrap; justify-content: flex-end; }
-  .time-label { font-size: 10px; background: #2a2d3a; padding: 1px 5px; border-radius: 4px; color: var(--text-3); }
-  .time-deadline { color: #f59e0b; font-weight: 500; }
-  .time-deadline-big { color: #f59e0b; font-weight: 700; font-size: 14px; text-align: right; line-height: 1.4; }
-  .card-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-  .ctag { font-size: 12px; padding: 3px 10px; border-radius: 20px; font-weight: 500; }
-  .ctag-blue  { background: #1a2a3a; color: #60a5fa; }
-  .ctag-amber { background: #2a1f0a; color: #f59e0b; }
-  .ctag-green { background: #0a2010; color: #4ade80; }
-  .ctag-gray  { background: #1a1d27; color: #9a9a96; border: 0.5px solid #333; }
-
-  /* 右欄分成「我的」和「其他人」 */
-  .sub-section { margin-bottom: 24px; }
-  .sub-label { font-size: 12px; color: var(--text-3); margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
-
-  @media (max-width: 640px) {
-    .columns { grid-template-columns: 1fr; }
-    .col { border-right: none; border-bottom: 1px solid var(--border); }
-    .stats-bar { flex-wrap: wrap; gap: 8px; padding: 12px 16px; }
-    .topbar { padding: 12px 16px; }
-  }
-</style>
-</head>
-<body>
-
-<!-- 登入畫面 -->
-<div id="login-screen">
-  <div class="login-box">
-    <div class="login-icon">🛵</div>
-    <h2>美食街外送看板</h2>
-    <p>請輸入你的姓名開始接單</p>
-    <input class="login-input" id="driver-name-input" type="text" placeholder="例：陳志明" maxlength="10" autofocus>
-    <button class="login-btn" onclick="enterBoard()">進入看板</button>
-  </div>
-</div>
-
-<!-- 主看板 -->
-<div id="board">
-  <div class="topbar">
-    <div class="topbar-left">
-      <div class="live-dot"></div>
-      <h1>Mula Kitchens 外送看板</h1>
-    </div>
-    <div class="topbar-right">
-      <div class="driver-chip">
-        <span>外送員：</span>
-        <strong id="driver-label"></strong>
-      </div>
-      <button class="btn-change" onclick="changeName()">換人</button>
-    </div>
-  </div>
-
-  <div class="stats-bar">
-    <div class="stat-chip">
-      <div class="stat-num num-amber" id="cnt-pending">—</div>
-      <div class="stat-label">待接單</div>
-    </div>
-    <div class="stat-chip">
-      <div class="stat-num num-green" id="cnt-mine">—</div>
-      <div class="stat-label">我的訂單</div>
-    </div>
-    <div class="stat-chip">
-      <div class="stat-num num-blue" id="cnt-done">—</div>
-      <div class="stat-label">今日完成</div>
-    </div>
-  </div>
-
-  <div class="columns">
-    <!-- 左欄：待接單 -->
-    <div class="col">
-      <div class="col-header">
-        <span class="col-title">待接單</span>
-        <span class="col-count count-amber" id="cnt-pending-badge">0</span>
-      </div>
-      <div id="pending-list"></div>
-    </div>
-
-    <!-- 右欄：進行中 -->
-    <div class="col">
-      <div class="col-header">
-        <span class="col-title">進行中</span>
-      </div>
-      <div class="sub-section">
-        <div class="sub-label">我的訂單</div>
-        <div id="mine-list"></div>
-      </div>
-      <div class="sub-section">
-        <div class="sub-label">其他外送員</div>
-        <div id="other-list"></div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<script>
-  // 同步 badge 數字
-  const obs = new MutationObserver(() => {
-    const cards = document.querySelectorAll('#pending-list .order-card');
-    const badge = document.getElementById('cnt-pending-badge');
-    if (badge) badge.textContent = cards.length;
-  });
-  const pendingList = document.getElementById('pending-list');
-  if (pendingList) obs.observe(pendingList, { childList: true });
-</script>
-
-</body>
-</html>
+  return res.status(200).json({ status: 'ok' });
+}
