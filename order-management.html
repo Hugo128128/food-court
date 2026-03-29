@@ -45,6 +45,19 @@
   const ORIGIN_ADDRESS  = '臺中市西屯區國安一路128號';
   let   ORIGIN = null; // 啟動時自動查詢
 
+  // 外送費自動計算（依距離分段）
+  function calcDeliveryFee(km) {
+    const k = parseFloat(km);
+    if (isNaN(k))   return '';
+    if (k <= 0.5)   return '30';
+    if (k <= 1.5)   return '60';
+    if (k <= 3)     return '75';
+    if (k <= 4.5)   return '90';
+    if (k <= 6)     return '105';
+    if (k <= 7)     return '120';
+    return '120';
+  }
+
   // 地理編碼（Google Maps Geocoding API）
   async function geocode(address) {
     try {
@@ -131,6 +144,87 @@
     }
   }
 
+  // 匯入訂單 Modal
+  window.openImport = () => {
+    document.getElementById('import-text').value = '';
+    document.getElementById('import-result').style.display = 'none';
+    document.getElementById('import-backdrop').classList.add('open');
+    setTimeout(() => document.getElementById('import-text').focus(), 50);
+  };
+  window.closeImport = () => document.getElementById('import-backdrop').classList.remove('open');
+
+  window.parseOrder = async () => {
+    const text = document.getElementById('import-text').value.trim();
+    if (!text) { alert('請貼上訂單內容'); return; }
+    const btn = document.getElementById('parse-btn');
+    btn.disabled = true; btn.textContent = '解析中...';
+
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1000,
+          messages: [{
+            role: 'user',
+            content: `以下是一段訂單訊息，請從中擷取資訊並以純 JSON 回應，不要有任何說明文字或 markdown：
+{"shop":"店家名稱","pickupNumber":"取餐號碼(若無留空)","customer":"顧客姓名(若無留空)","items":"品項內容","address":"送達地址","deliveryTime":"送達時間(若無留空)","amount":"金額數字(只填數字，若無留空)","note":"備註(若無留空)"}
+
+訂單內容：
+${text}`
+          }]
+        })
+      });
+      const data = await res.json();
+      const raw = data.content?.[0]?.text || '';
+      const clean = raw.replace(/```json|```/g,'').trim();
+      const parsed = JSON.parse(clean);
+
+      // 填入預覽欄位
+      document.getElementById('prev-shop').textContent    = parsed.shop || '—';
+      document.getElementById('prev-pickup').textContent  = parsed.pickupNumber || '—';
+      document.getElementById('prev-customer').textContent= parsed.customer || '—';
+      document.getElementById('prev-items').textContent   = parsed.items || '—';
+      document.getElementById('prev-address').textContent = parsed.address || '—';
+      document.getElementById('prev-time').textContent    = parsed.deliveryTime || '—';
+      document.getElementById('prev-amount').textContent  = parsed.amount ? '$'+parsed.amount : '—';
+      document.getElementById('prev-note').textContent    = parsed.note || '—';
+
+      document.getElementById('import-result').style.display = 'block';
+      document.getElementById('import-result').dataset.parsed = JSON.stringify(parsed);
+    } catch(e) {
+      alert('解析失敗，請確認內容或重試
+' + e.message);
+    }
+    btn.disabled = false; btn.textContent = '🤖 AI 解析';
+  };
+
+  window.confirmImport = async () => {
+    const parsed = JSON.parse(document.getElementById('import-result').dataset.parsed || '{}');
+    closeImport();
+    // 填入主表單
+    buildTimeOptions();
+    document.getElementById('distance-result').textContent = '';
+    document.getElementById('map-link').style.display = 'none';
+    document.getElementById('modal-backdrop').classList.add('open');
+    document.getElementById('f-shop').value         = parsed.shop || '';
+    document.getElementById('f-pickup-number').value= parsed.pickupNumber || '';
+    document.getElementById('f-customer').value     = parsed.customer || '';
+    document.getElementById('f-items').value        = parsed.items || '';
+    document.getElementById('f-note').value         = parsed.note || '';
+    document.getElementById('f-amount').value       = parsed.amount || '';
+    // 地址填入後自動計算距離和外送費
+    const addrEl = document.getElementById('f-address');
+    addrEl.value = parsed.address || '';
+    if (parsed.address) await onAddressInput();
+    // 送達時間
+    if (parsed.deliveryTime) {
+      const sel = document.getElementById('f-delivery-time');
+      [...sel.options].forEach(o => { if (o.value.includes(parsed.deliveryTime)) sel.value = o.value; });
+    }
+  };
+
   window.openModal = () => {
     buildTimeOptions();
     document.getElementById('distance-result').textContent = '';
@@ -152,6 +246,7 @@
     const distance     = document.getElementById('distance-result').dataset.km || '';
     const pickupNumber = document.getElementById('f-pickup-number').value.trim();
     const customer     = document.getElementById('f-customer').value.trim();
+    const cashPayment  = document.getElementById('f-cash').checked ? '是' : '否';
 
     if (!shop || !items || !address) { alert('請填寫店家、品項、送達地址'); return; }
 
@@ -160,7 +255,7 @@
 
     try {
       const docRef = await addDoc(collection(db, 'orders'), {
-        shop, items, address, note, deliveryTime, deliveryFee, amount, distance, pickupNumber, customer,
+        shop, items, address, note, deliveryTime, deliveryFee, amount, distance, pickupNumber, customer, cashPayment,
         status: 'pending', driver: '', createdAt: serverTimestamp(),
       });
 
@@ -172,12 +267,13 @@
           order: {
             id: docRef.id,
             shortId: docRef.id.slice(-6).toUpperCase(),
-            shop, items, address, note, deliveryTime, deliveryFee, amount, distance, pickupNumber, customer,
+            shop, items, address, note, deliveryTime, deliveryFee, amount, distance, pickupNumber, customer, cashPayment, cashPayment,
           }
         }),
       });
 
       ['f-shop','f-items','f-address','f-note','f-delivery-fee','f-amount','f-pickup-number','f-customer'].forEach(id => document.getElementById(id).value='');
+      document.getElementById('f-cash').checked = false;
       document.getElementById('f-delivery-time').value = '';
       document.getElementById('distance-result').textContent = '';
       document.getElementById('map-link').style.display = 'none';
@@ -236,6 +332,52 @@
     renderList();
   };
 
+  window.exportExcel = () => {
+    if (!allOrders.length) { alert('目前沒有訂單資料'); return; }
+
+    const headers = ['訂單編號','建立時間','店家','取餐號碼','顧客','品項','送達地址','距離(km)','送達時間','訂單金額','外送費','備註','狀態','外送員','完成時間'];
+
+    const statusLabel = { pending:'待接單', accepted:'已接單', delivering:'配送中', done:'已送達', cancelled:'已取消' };
+
+    const rows = allOrders.map(o => {
+      const createdAt  = o.createdAt?.toDate  ? o.createdAt.toDate().toLocaleString('zh-TW')  : '';
+      const completedAt= o.completedAt?.toDate? o.completedAt.toDate().toLocaleString('zh-TW'): '';
+      return [
+        o.id.slice(-6).toUpperCase(),
+        createdAt,
+        o.shop        || '',
+        o.pickupNumber|| '',
+        o.customer    || '',
+        o.items       || '',
+        o.address     || '',
+        o.distance    || '',
+        o.deliveryTime|| '',
+        o.amount      || '',
+        o.deliveryFee || '',
+        o.note        || '',
+        statusLabel[o.status] || o.status || '',
+        o.driver      || '',
+        completedAt,
+      ];
+    });
+
+    // 產生 CSV（加 BOM 讓 Excel 正確顯示中文）
+    const BOM = '\uFEFF';
+    const csvContent = BOM + [headers, ...rows]
+      .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    const date = new Date().toLocaleDateString('zh-TW').replace(/\//g, '-');
+    a.href     = url;
+    a.download = `Mula_Kitchens_訂單明細_${date}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('Excel 匯出成功！');
+  };
+
   function showToast(msg) {
     const t = document.getElementById('toast');
     t.textContent = msg; t.classList.add('show');
@@ -279,6 +421,7 @@
         o.deliveryTime ? `<span class="tag tag-amber">⏰ ${o.deliveryTime}</span>` : '',
         o.amount       ? `<span class="tag tag-green">💰 $${o.amount}</span>` : '',
         o.deliveryFee  ? `<span class="tag tag-gray">外送費 $${o.deliveryFee}</span>` : '',
+        o.cashPayment==='是' ? `<span class="tag tag-cash">需收現金</span>` : '',
       ].filter(Boolean).join('');
 
       return `<div class="order-card">
@@ -325,6 +468,8 @@
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
   .btn-new{background:var(--green);color:#fff;border:none;border-radius:var(--radius-sm);padding:10px 20px;font-size:14px;font-weight:500;cursor:pointer;font-family:inherit;transition:background .15s}
   .btn-new:hover{background:var(--green-dark)}
+  .btn-export{background:transparent;color:var(--text-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 16px;font-size:14px;font-weight:500;cursor:pointer;font-family:inherit;transition:all .15s}
+  .btn-export:hover{background:var(--gray-light);border-color:var(--border-hover)}
   .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px}
   .stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px}
   .stat-label{font-size:12px;color:var(--text-3);margin-bottom:4px}
@@ -348,6 +493,7 @@
   .tag-amber{background:var(--amber-light);color:#92400e}
   .tag-green{background:var(--green-light);color:#065f46}
   .tag-gray{background:var(--gray-light);color:var(--text-2)}
+  .tag-cash{background:#fef3c7;color:#92400e;font-weight:700}
   .tag-purple{background:#ede9fe;color:#5b21b6}
   .status-badge{font-size:11px;font-weight:500;padding:4px 11px;border-radius:20px;white-space:nowrap;flex-shrink:0}
   .badge-pending{font-size:16px!important;padding:8px 16px!important;font-weight:700!important}
@@ -392,6 +538,8 @@
   .map-link:hover{border-color:var(--green)}
   .form-actions{display:flex;gap:10px;margin-top:22px}
   .btn-cancel{flex:1;padding:11px;border:1px solid var(--border);border-radius:var(--radius-sm);background:transparent;cursor:pointer;font-family:inherit;font-size:14px;color:var(--text-2)}
+  .btn-import{font-size:12px;padding:6px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:transparent;cursor:pointer;font-family:inherit;color:var(--text-2);transition:all .12s}
+  .btn-import:hover{background:var(--gray-light)}
   .btn-submit{flex:2;padding:11px;border:none;border-radius:var(--radius-sm);background:var(--green);color:#fff;cursor:pointer;font-family:inherit;font-size:14px;font-weight:700;transition:background .12s}
   .btn-submit:hover{background:var(--green-dark)}
   .btn-submit:disabled{opacity:.6;cursor:not-allowed}
@@ -412,7 +560,10 @@
       <h1>Mula Kitchens 外送派單系統</h1>
       <div class="header-sub"><div class="live-dot"></div><span>即時同步中</span></div>
     </div>
-    <button class="btn-new" onclick="openModal()">＋ 新增訂單</button>
+    <div style="display:flex;gap:8px">
+      <button class="btn-export" onclick="exportExcel()">⬇ 匯出 Excel</button>
+      <button class="btn-new" onclick="openModal()">＋ 新增訂單</button>
+    </div>
   </div>
 
   <div class="stats">
@@ -435,8 +586,13 @@
 <div class="modal-backdrop" id="modal-backdrop" onclick="if(event.target===this)closeModal()">
   <div class="modal">
     <div class="modal-header">
-      <h2>新增訂單</h2>
-      <button class="modal-close" onclick="closeModal()">✕</button>
+      <div>
+        <h2 id="modal-title">新增訂單</h2>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn-import" onclick="openImport()">📋 匯入訂單</button>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+      </div>
     </div>
     <div class="form-row">
       <div class="form-group">
@@ -484,6 +640,12 @@
         <input class="form-input" id="f-note" type="text" placeholder="例：門口按對講機">
       </div>
     </div>
+    <div class="form-group" style="margin-bottom:8px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px;color:var(--text)">
+        <input type="checkbox" id="f-cash" style="width:18px;height:18px;accent-color:var(--green);cursor:pointer">
+        <span>💵 需收現金</span>
+      </label>
+    </div>
     <div class="form-actions">
       <button class="btn-cancel" onclick="closeModal()">取消</button>
       <button class="btn-submit" id="submit-btn" onclick="submitOrder()">建立訂單並通知外送員</button>
@@ -492,5 +654,40 @@
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- 匯入訂單 Modal -->
+<div class="modal-backdrop" id="import-backdrop" onclick="if(event.target===this)closeImport()">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <h2>匯入訂單</h2>
+      <button class="modal-close" onclick="closeImport()">✕</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">貼上訂單內容</label>
+      <textarea class="form-textarea" id="import-text" style="min-height:140px" placeholder="貼上從 LINE 複製的訂單訊息，例如：&#10;&#10;客戶：王小明&#10;地址：台中市西屯區文心路100號&#10;品項：珍奶x2、拿鐵x1&#10;金額：280元&#10;備註：不加糖"></textarea>
+    </div>
+    <button class="btn-submit" id="parse-btn" onclick="parseOrder()" style="width:100%;margin-bottom:14px">🤖 AI 解析</button>
+
+    <div id="import-result" style="display:none">
+      <div style="background:var(--gray-light);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;font-size:13px">
+        <div style="font-weight:700;margin-bottom:10px;font-size:14px">解析結果預覽</div>
+        <table style="width:100%;border-collapse:collapse">
+          <tr><td style="color:var(--text-2);padding:4px 0;width:80px">店家</td><td style="font-weight:500" id="prev-shop"></td></tr>
+          <tr><td style="color:var(--text-2);padding:4px 0">取餐號碼</td><td id="prev-pickup"></td></tr>
+          <tr><td style="color:var(--text-2);padding:4px 0">顧客</td><td id="prev-customer"></td></tr>
+          <tr><td style="color:var(--text-2);padding:4px 0">品項</td><td id="prev-items"></td></tr>
+          <tr><td style="color:var(--text-2);padding:4px 0">地址</td><td id="prev-address"></td></tr>
+          <tr><td style="color:var(--text-2);padding:4px 0">送達時間</td><td id="prev-time"></td></tr>
+          <tr><td style="color:var(--text-2);padding:4px 0">金額</td><td id="prev-amount"></td></tr>
+          <tr><td style="color:var(--text-2);padding:4px 0">備註</td><td id="prev-note"></td></tr>
+        </table>
+      </div>
+      <div class="form-actions" style="margin-top:0">
+        <button class="btn-cancel" onclick="closeImport()">取消</button>
+        <button class="btn-submit" onclick="confirmImport()">✅ 確認，填入表單</button>
+      </div>
+    </div>
+  </div>
+</div>
 </body>
 </html>
