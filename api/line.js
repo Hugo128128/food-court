@@ -216,6 +216,92 @@ export default async function handler(req, res) {
         console.log('群組 ID：', event.source.groupId);
       }
 
+      // ── 關鍵字觸發：還有單嗎 ──
+      if (event.type === 'message' && event.message?.type === 'text') {
+        const text = event.message.text.trim();
+        const keywords = ['還有單嗎', '有單嗎', '有單嗎?', '還有單嗎?', '還有單嗎？', '有單嗎？'];
+        if (keywords.includes(text)) {
+          try {
+            // 撈所有訂單，過濾出待接單
+            const r = await fetch(`${FIREBASE_URL}?key=${FIREBASE_API_KEY}&pageSize=100`);
+            const data = await r.json();
+            const docs = data.documents || [];
+            const pending = docs.filter(d => d.fields?.status?.stringValue === 'pending');
+
+            if (pending.length === 0) {
+              await sendToGroup([{ type: 'text', text: '目前沒有待接的訂單 ✅' }]);
+            } else {
+              const lines = pending.map((d, i) => {
+                const f = d.fields;
+                const shop    = f.shop?.stringValue || '';
+                const pickup  = f.pickupNumber?.stringValue || '';
+                const addr    = f.address?.stringValue || '';
+                const time    = f.deliveryTime?.stringValue || '';
+                const fee     = f.deliveryFee?.stringValue || '';
+                return `${i+1}. ${shop}${pickup ? ' #'+pickup : ''}　${addr}${time ? '　'+time+'送達' : ''}${fee ? '　外送費$'+fee : ''}`;
+              });
+              await sendToGroup([{
+                type: 'text',
+                text: `📋 目前有 ${pending.length} 張待接單：
+
+${lines.join('
+')}
+
+請到 LINE 卡片點「✋ 接單」`,
+              }]);
+            }
+          } catch(e) {
+            console.error('查詢待接單失敗：', e.message);
+          }
+        }
+
+        // ── 關鍵字觸發：我的趟次 ──
+        const tripKeywords = ['我的趟次', '我的單', '查趟次', '本月趟次', '我的記錄'];
+        if (tripKeywords.includes(text)) {
+          const driverName = await getDisplayName(event.source.groupId, event.source.userId);
+          try {
+            const r = await fetch(`${FIREBASE_URL}?key=${FIREBASE_API_KEY}&pageSize=300`);
+            const data = await r.json();
+            const docs = data.documents || [];
+
+            const now = new Date();
+            const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+            // 過濾本月份該外送員已送達的訂單
+            const myTrips = docs.filter(d => {
+              const f = d.fields;
+              if (f?.driver?.stringValue !== driverName) return false;
+              if (f?.status?.stringValue !== 'done') return false;
+              const completedAt = f?.completedAt?.timestampValue;
+              if (!completedAt) return false;
+              return new Date(completedAt) >= monthStart;
+            });
+
+            // 計算總外送費
+            const totalFee = myTrips.reduce((sum, d) => {
+              const fee = parseFloat(d.fields?.deliveryFee?.stringValue || '0');
+              return sum + (isNaN(fee) ? 0 : fee);
+            }, 0);
+
+            if (myTrips.length === 0) {
+              await sendToGroup([{
+                type: 'text',
+                text: `${driverName}，你本月還沒有完成的送單記錄。`,
+              }]);
+            } else {
+              const monthStr = `${now.getMonth()+1}月`;
+              await sendToGroup([{
+                type: 'text',
+                text: `📦 ${driverName} ${monthStr}送單記錄 共 ${myTrips.length} 趟
+(此為系統計算，數字僅供參考，以商場月結核對為主)`,
+              }]);
+            }
+          } catch(e) {
+            console.error('查詢趟次失敗：', e.message);
+          }
+        }
+      }
+
       if (event.type === 'postback') {
         const params  = new URLSearchParams(event.postback.data);
         const action  = params.get('action');
