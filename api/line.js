@@ -242,12 +242,7 @@ export default async function handler(req, res) {
               });
               await sendToGroup([{
                 type: 'text',
-                text: `📋 目前有 ${pending.length} 張待接單：
-
-${lines.join('
-')}
-
-請到 LINE 卡片點「✋ 接單」`,
+                text: `📋 目前有 ${pending.length} 張待接單：\n\n${lines.join('\n')}\n\n請到 LINE 卡片點「✋ 接單」`,
               }]);
             }
           } catch(e) {
